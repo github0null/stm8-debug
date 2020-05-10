@@ -2,12 +2,13 @@
     "name": "stm8-debug",
     "displayName": "STM8 Debugger",
     "description": "STM8 Debugger for vscode",
-    "version": "1.0.0",
+    "version": "0.1.0",
     "publisher": "cl",
     "author": {
         "name": "cl",
         "email": "2584456014@qq.com"
     },
+    "preview": true,
     "keywords": [
         "stm8",
         "swim",
@@ -389,7 +390,7 @@
         "@types/glob": "^7.1.1",
         "@types/mocha": "^5.2.7",
         "@types/node": "^12.11.7",
-        "@types/vscode": "^1.45.0",
+        "@types/vscode": "^1.40.0",
         "glob": "^7.1.5",
         "mocha": "^6.2.2",
         "ts-loader": "^7.0.3",

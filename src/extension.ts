@@ -2,10 +2,17 @@ import * as vscode from 'vscode';
 import * as net from 'net';
 import { DebugAdapter } from './DebugAdapter';
 import { ResourceManager } from './ResourceManager';
+import * as os from 'os';
 
 export function activate(context: vscode.ExtensionContext) {
 
     console.log('---- stm8 debugger actived ----');
+
+    if(os.platform() !== 'win32') {
+        vscode.window.showErrorMessage('STM8 Debugger only for win32 platform !');
+        return;
+    }
+
     ResourceManager.getInstance(context);
 
     context.subscriptions.push(

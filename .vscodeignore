@@ -9,3 +9,5 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 *.vsix
+*.config.js
+*.code-workspace
