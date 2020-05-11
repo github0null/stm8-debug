@@ -66,8 +66,7 @@
                         "required": [
                             "executable",
                             "cpu",
-                            "interface",
-                            "port"
+                            "interface"
                         ],
                         "properties": {
                             "name": {
@@ -358,8 +357,7 @@
                         "name": "stm8-launch",
                         "executable": ".\\out\\executable.out",
                         "cpu": "STM8S105K4",
-                        "interface": "stlink3",
-                        "port": "COM3"
+                        "interface": "stlink3"
                     }
                 ],
                 "configurationSnippets": [
@@ -372,8 +370,7 @@
                             "name": "${1:Launch Program}",
                             "executable": ".\\out\\executable.out",
                             "cpu": "STM8S105K4",
-                            "interface": "stlink3",
-                            "port": "COM3"
+                            "interface": "stlink3"
                         }
                     }
                 ]

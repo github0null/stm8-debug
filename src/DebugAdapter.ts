@@ -86,11 +86,11 @@ export class DebugAdapter extends DebugSession {
     }
 
     private log(line: string) {
-        this.sendEvent(new OutputEvent(`${line}\r\n`));
+        this.sendEvent(new OutputEvent(`${line}\r\n`, 'stdout'));
     }
 
     private warn(line: string) {
-        this.sendEvent(new OutputEvent(`${line}\r\n`, 'stderr'));
+        this.sendEvent(new OutputEvent(`${line}\r\n`));
     }
 
     private error(line: string) {
@@ -208,6 +208,7 @@ export class DebugAdapter extends DebugSession {
         response.body.supportsEvaluateForHovers = true;
         response.body.supportsConditionalBreakpoints = true;
         response.body.supportsRestartRequest = true;
+        response.body.supportsTerminateRequest = true;
 
         const resManager = ResourceManager.getInstance();
         const gdbPath = resManager
@@ -234,12 +235,20 @@ export class DebugAdapter extends DebugSession {
         }
     }
 
-    protected async disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments) {
+    // terminal gdb connect
+    protected async terminateRequest(response: DebugProtocol.TerminateResponse, args: DebugProtocol.TerminateArguments, request?: DebugProtocol.Request) {
         await this.gdb.disconnect();
         this.isConnected = false;
-        await this.gdb.kill();
         this.sendResponse(response);
-        this.shutdown();
+    }
+
+    // kill gdb.exe
+    protected async disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments) {
+        this.warn('[SEND]: kill gdb.exe');
+        await this.gdb.kill();
+        this.warn('\tdone');
+        this.warn('[END]');
+        this.sendResponse(response);
     }
 
 	/**

@@ -38,9 +38,11 @@ export class GDB implements IGDB {
 
     async connect(option: ConnectOption, otherCommand?: string[]): Promise<boolean> {
 
+        const portString = option.port ? `-port ${option.port}` : '';
+
         const commandList: string[] = [
             `file "${option.executable}"`,
-            `target gdi -dll swim\\stm_swim.dll -${option.interface} -port ${option.port}`,
+            `target gdi -dll swim\\stm_swim.dll -${option.interface} ${portString}`,
             `mcuname -set ${option.cpu}`,
             `load "${option.executable}"`
         ];
@@ -60,8 +62,8 @@ export class GDB implements IGDB {
 
         // user's command
         if (option.customCommands) {
-            for (const cmd of option.customCommands) {
-                await this.sendCommand(cmd, this.connect.name);
+            for (const customCmd of option.customCommands) {
+                await this.sendCommand(customCmd, this.connect.name);
             }
         }
 
@@ -343,22 +345,28 @@ export class GDB implements IGDB {
                     const lines = data.lines;
                     this.cmdQueue.removeListener('lines', dathandler);
 
-                    if (logType !== 'hide') {
-                        this.log(logType, `[SEND]: ${command}`);
-                        this.log(logType, lines.map((ln) => { return `\t${ln}`; }).join('\r\n'));
-                        this.log(logType, '[END]');
-                    }
-
                     try {
                         const result = this.parser.parse(funcName, lines);
+
                         if (result.resultType === 'failed') {
-                            this.log('error', `[${result.resultType}]: ${result.data.error}`);
+                            this.log('error', `[ERROR]: ${command}`);
+                            this.log('error', lines.map((ln) => { return `\t${ln}`; }).join('\r\n'));
+                            this.log('error', '[END]');
                         }
+                        else if (logType !== 'hide') {
+                            this.log(logType, `[SEND]: ${command}`);
+                            this.log(logType, lines.map((ln) => { return `\t${ln}`; }).join('\r\n'));
+                            this.log(logType, '[END]');
+                        }
+
                         resolve(result);
+
                     } catch (error) {
+
                         const rData = new ResultData();
                         this.log('error', `[Parser Error]: ${(<Error>error).message}`);
                         rData.error = `parse error: ${(<Error>error).message}`;
+
                         resolve({
                             resultType: 'failed',
                             data: rData,
@@ -478,7 +486,8 @@ class CommandQueue {
 
             this.proc.Run(exe, args, { encoding: 'utf8' });
 
-            this.proc.stdout.on('data', (chunk) => this.onData(chunk));
+            this.proc.stdout.on('data', this.onData.bind(this));
+            this.proc.stderr.on('data', this.onData.bind(this));
         });
     }
 
@@ -629,9 +638,16 @@ class GdbParser {
     private parseLine(funcName: string, line: string, result: GdbResult): void {
 
         // failed
-        if (line.startsWith('Error:')) {
+        if (line.startsWith('Error')) {
             result.resultType = 'failed';
             result.data.error = line.replace('Error:', '').trim();
+            return;
+        }
+
+        // Not available for current target.
+        if (line.startsWith('Not available for current target')) {
+            result.resultType = 'failed';
+            result.data.error = line;
             return;
         }
 
@@ -872,8 +888,8 @@ class GdbParser {
         while (parseList.length > 0) {
 
             const tVar = <Variable>parseList.pop();
-            const varArr = this.splitObj(<string>tVar.value).map((item) => { 
-                return item.trim(); 
+            const varArr = this.splitObj(<string>tVar.value).map((item) => {
+                return item.trim();
             });
 
             // init obj

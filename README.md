@@ -2,7 +2,7 @@
 
 ## Summary 📑
 
-A STM8 Debugger for vscode. use GDB to debug your STM8 program
+A STM8 Debugger for vscode. Use GDB to debug your STM8 program
 
 **Only for Windows platform**
 
@@ -34,7 +34,6 @@ A STM8 Debugger for vscode. use GDB to debug your STM8 program
             "name": "Launch Program",
             "executable": ".\\out\\IAR_STM8\\stm8_demo.out",
             "cpu": "STM8S105K4",
-            "port": "COM3",
             "interface": "stlink3"
         }
     ]
@@ -42,4 +41,8 @@ A STM8 Debugger for vscode. use GDB to debug your STM8 program
 ```
 
 2. press `F5` to launch stm8 debugger
+
+## Attention 🚩
+
+- **The file path must contain only ASCII characters**
 

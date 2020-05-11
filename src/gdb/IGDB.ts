@@ -54,8 +54,8 @@ export interface Variable extends VariableDefine {
 export interface ConnectOption {
     executable: string;
     interface: string;
-    port: string;
     cpu: string;
+    port?: string;
     customCommands?: string[];
 }
 
