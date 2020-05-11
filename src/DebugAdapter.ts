@@ -49,11 +49,7 @@ export class DebugAdapter extends DebugSession {
     private readonly ThreadID = 1;
 
     private gdb: GDB;
-    private console: Console;
     private cwd: File;
-
-    private stderr: Writable;
-    private stdout: Writable;
 
     private configDoneEmitter: Subject = new Subject();
     private isConnected: boolean = false;
@@ -69,30 +65,36 @@ export class DebugAdapter extends DebugSession {
 
         this.vHandles = new Handles(DebugAdapter.HANLER_START);
         this.cwd = <File>ResourceManager.getInstance().getWorkspaceDir();
-
         this.gdb = new GDB(ResourceManager.getInstance().isVerboseMode());
-
-        this.stdout = new Writable({
-            write: (chunk: Buffer) => {
-                this.sendEvent(new OutputEvent(chunk.toString(), 'stdout'));
-            }
-        });
-        this.stderr = new Writable({
-            write: (chunk: Buffer) => {
-                this.sendEvent(new OutputEvent(chunk.toString(), 'stderr'));
-            }
-        });
-
-        this.console = new console.Console(this.stdout, this.stderr);
 
         this.setDebuggerColumnsStartAt1(false);
         this.setDebuggerLinesStartAt1(false);
 
         this.gdb.on('log', (logData) => {
-            this.sendEvent(new OutputEvent(
-                `${logData.msg}\r\n`,
-                logData.type === 'log' ? 'stdout' : 'stderr'));
+            switch (logData.type) {
+                case 'warning':
+                    this.warn(logData.msg);
+                    break;
+                case 'error':
+                    this.error(logData.msg);
+                    break;
+                default:
+                    this.log(logData.msg);
+                    break;
+            }
         });
+    }
+
+    private log(line: string) {
+        this.sendEvent(new OutputEvent(`${line}\r\n`));
+    }
+
+    private warn(line: string) {
+        this.sendEvent(new OutputEvent(`${line}\r\n`, 'stderr'));
+    }
+
+    private error(line: string) {
+        this.sendEvent(new OutputEvent(`${line}\r\n`, 'stderr'));
     }
 
     private cacheChild(children: IGDB.VariableChildren): number {
@@ -207,8 +209,15 @@ export class DebugAdapter extends DebugSession {
         response.body.supportsConditionalBreakpoints = true;
         response.body.supportsRestartRequest = true;
 
-        const gdbPath = ResourceManager.getInstance()
+        const resManager = ResourceManager.getInstance();
+        const gdbPath = resManager
             .getBinDir().path + File.sep + 'gdb.exe';
+
+        // clear log
+        const logFile = File.fromArray([resManager.getBinDir().dir, 'swim', 'Error.log']);
+        if (logFile.IsFile()) {
+            logFile.Write('');
+        }
 
         const errMsg = await this.gdb.start(gdbPath, [
             `--quiet`,
@@ -217,7 +226,7 @@ export class DebugAdapter extends DebugSession {
         ]);
 
         if (errMsg) {
-            this.console.error(errMsg);
+            this.error(errMsg);
             this.sendEvent(new TerminatedEvent());
         } else {
             this.sendResponse(response);
@@ -306,7 +315,7 @@ export class DebugAdapter extends DebugSession {
 
         if (file === undefined) {
             this.sendResponse(response);
-            this.console.warn(`set breakpoint on 'undefine' path`);
+            this.warn(`set breakpoint on 'undefine' path`);
             return;
         }
 
@@ -420,40 +429,39 @@ export class DebugAdapter extends DebugSession {
 
         // is scope
         if (args.variablesReference < DebugAdapter.HANLER_START) {
+
             const scopeType = <ScopeType>args.variablesReference;
-            switch (scopeType) {
-                case ScopeType.SCOPE_GLOBAL:
-                    for (const name of this.globalVars) {
-                        const _var = await this.gdb.getVariableValue(name);
-                        if (_var) {
-                            response.body.variables.push(this.vToVariable(_var));
-                        }
+
+            if (scopeType === ScopeType.SCOPE_GLOBAL) {
+                for (const name of this.globalVars) {
+                    const _var = await this.gdb.getVariableValue(name);
+                    if (_var) {
+                        response.body.variables.push(this.vToVariable(_var));
                     }
-                    break;
-                case ScopeType.SCOPE_LOCAL:
-                    const variables = await this.gdb.getLocalVariables();
-                    if (variables) {
-                        response.body.variables = variables.map((_var) => {
-                            return this.vToVariable(_var);
-                        });
-                    }
-                    break;
-                case ScopeType.SCOPE_REGISTER:
-                    const vList = await this.gdb.getRegisterVariables();
-                    if (vList) {
-                        response.body.variables = vList.map((_v) => {
-                            return this.vToVariable(_v);
-                        });
-                    }
-                    break;
-                default:
-                    break;
+                }
+            }
+
+            if (scopeType === ScopeType.SCOPE_LOCAL) {
+                const variables = await this.gdb.getLocalVariables();
+                if (variables) {
+                    response.body.variables = variables.map((_var) => {
+                        return this.vToVariable(_var);
+                    });
+                }
+            }
+
+            if (scopeType === ScopeType.SCOPE_REGISTER) {
+                const vList = await this.gdb.getRegisterVariables();
+                if (vList) {
+                    response.body.variables = vList.map((_v) => {
+                        return this.vToVariable(_v);
+                    });
+                }
             }
 
             // update var root
             this.rootVariables.set(scopeType, response.body.variables);
             this.sendResponse(response);
-
         } else {
             response.body.variables = this.vGetChildren(args.variablesReference);
             this.sendResponse(response);

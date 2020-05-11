@@ -2,11 +2,18 @@ import * as process from 'child_process';
 import * as events from 'events';
 import * as ReadLine from 'readline';
 import { EOL } from 'os';
+import { Stream, Writable, Readable } from 'stream';
 
 export type ExecutableOption = { encoding?: string | null } & process.ExecFileOptions
     | process.ForkOptions | process.ExecOptions;
 
 export interface Executable {
+
+    readonly stdin: Writable;
+
+    readonly stdout: Readable;
+
+    readonly stderr: Readable;
 
     Run(exePath: string, args?: string[], options?: ExecutableOption): void;
 
@@ -14,23 +21,13 @@ export interface Executable {
 
     IsExit(): boolean;
 
-    write(chunk: any): Promise<Error | undefined | null>;
-
-    remove(event: any, lisenter: any): void;
-
     signal(signal: NodeJS.Signals): void;
-
-    on(event: 'data', listener: (data: string) => void): this;
 
     on(event: 'launch', listener: (launchOk?: boolean) => void): this;
 
     on(event: 'close', listener: (exitInfo: ExitInfo) => void): this;
 
     on(event: 'error', listener: (err: Error) => void): this;
-
-    on(event: 'line', listener: (line: string) => void): this;
-
-    on(event: 'errLine', listener: (line: string) => void): this;
 }
 
 export interface ExitInfo {
@@ -48,6 +45,10 @@ export abstract class Process implements Executable {
     protected proc: process.ChildProcess | null = null;
     protected launchTimeout: number;
 
+    public stdin: Writable = <any>null;
+    public stdout: Readable = <any>null;
+    public stderr: Readable = <any>null;
+
     private _exited: boolean;
 
     constructor(timeout?: number) {
@@ -59,35 +60,11 @@ export abstract class Process implements Executable {
     on(event: 'launch', listener: () => void): this;
     on(event: 'close', listener: (exitInfo: ExitInfo) => void): this;
     on(event: 'error', listener: (err: Error) => void): this;
-    on(event: 'data', listener: (data: string) => void): this;
-    on(event: 'line', listener: (line: string) => void): this;
-    on(event: 'errLine', listener: (line: string) => void): this;
     on(event: any, listener: (argc?: any) => void) {
         this._event.on(event, listener);
         return this;
     }
-
-    remove(event: any, lisenter: any): void {
-        this._event.removeListener(event, lisenter);
-    }
-
-    write(chunk: any): Promise<Error | undefined | null> {
-        return new Promise((resolve) => {
-            try {
-                const process = <process.ChildProcess>this.proc;
-                if (process.stdin) {
-                    process.stdin.write(chunk, (err) => {
-                        resolve(err);
-                    });
-                } else {
-                    resolve(new Error('process \'stdin\' is null !'));
-                }
-            } catch (error) {
-                resolve(error);
-            }
-        });
-    }
-
+    
     signal(signal: NodeJS.Signals): void {
         if (this.proc === null) {
             throw new Error('process is not launched !');
@@ -105,32 +82,18 @@ export abstract class Process implements Executable {
 
         this._exited = false;
 
+        if (this.proc.stdin) {
+            this.stdin = this.proc.stdin;
+        }
+
         if (this.proc.stdout) {
-
             this.proc.stdout.setEncoding((<any>options)?.encoding || this.codeType);
-            this.proc.stdout.on('data', (data: string) => {
-                this._event.emit('data', data);
-            });
-
-            // line
-            const stdout = ReadLine.createInterface({ input: this.proc.stdout });
-            stdout.on('line', (line) => {
-                this._event.emit('line', line);
-            });
+            this.stdout = this.proc.stdout;
         }
 
         if (this.proc.stderr) {
-
             this.proc.stderr.setEncoding((<any>options)?.encoding || this.codeType);
-            this.proc.stderr.on('data', (data: string) => {
-                this._event.emit('data', data);
-            });
-
-            // line
-            const stderr = ReadLine.createInterface({ input: this.proc.stderr });
-            stderr.on('line', (line) => {
-                this._event.emit('errLine', line);
-            });
+            this.stderr = this.proc.stderr;
         }
 
         this.proc.on('error', (err) => {

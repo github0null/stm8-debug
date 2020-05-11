@@ -74,8 +74,6 @@ export interface IGDB {
 
     kill(): Promise<void>;
 
-    isRunning(): boolean;
-
     on(event: 'log', lisenter: (data: LogData) => void): void;
 
     sendCommand(command: string, funcName: string, logType: LogType): Promise<GdbResult>;

@@ -1,5 +1,5 @@
 import { IGDB, GdbResult, Breakpoint, Stack, Variable, ErrorMsg, VariableDefine, ResultData, ConnectOption, LogType, LogData } from "./IGDB";
-import * as events from 'events';
+import { EventEmitter } from 'events';
 import { Executable, ExeFile } from '../../lib/node-utility/Executable';
 import * as path from 'path';
 
@@ -8,17 +8,19 @@ export class GDB implements IGDB {
     private readonly COMMAND_INTRRUPT: string = 'interrupt';
     private readonly SIGNAL_INTRRUPT: NodeJS.Signals = 'SIGTRAP';
 
-    private process: Executable;
-    private _event: events.EventEmitter;
+    private _event: EventEmitter;
     private parser: GdbParser;
     private stopped: boolean;
+
+    private cmdQueue: CommandQueue;
+    private nextID: number = 0;
 
     private hiddenMsgType?: LogType;
 
     constructor(verbose?: boolean) {
-        this.process = new ExeFile();
-        this._event = new events.EventEmitter();
+        this._event = new EventEmitter();
         this.parser = new GdbParser(this);
+        this.cmdQueue = new CommandQueue();
         this.stopped = false;
         this.hiddenMsgType = verbose ? undefined : 'hide';
     }
@@ -28,6 +30,10 @@ export class GDB implements IGDB {
             type: label,
             msg: msg
         });
+    }
+
+    private obtainID(): number {
+        return this.nextID++;
     }
 
     async connect(option: ConnectOption, otherCommand?: string[]): Promise<boolean> {
@@ -51,7 +57,7 @@ export class GDB implements IGDB {
                 await this.sendCommand(cmd, this.connect.name, 'hide');
             }
         }
-        
+
         // user's command
         if (option.customCommands) {
             for (const cmd of option.customCommands) {
@@ -302,63 +308,40 @@ export class GDB implements IGDB {
         this._event.on(event, lisenter);
     }
 
-    start(exe: string, args?: string[] | undefined): Promise<ErrorMsg | null> {
-        return new Promise((resolve) => {
-            try {
-                this.process.on('launch', (launchOk) => {
-                    if (launchOk) {
-                        resolve();
-                    } else {
-                        resolve('GDB launch failed !');
-                    }
-                });
+    async start(exe: string, args?: string[] | undefined): Promise<ErrorMsg | null> {
 
-                this.process.on('error', (err) => {
-                    this.log('error', `${err.message} : \r\n${err.stack}`);
-                });
-
-                let _lines = new StringBuffer();
-                const launchLogger = (data: string) => {
-                    _lines.append(data);
-                    if (_lines.getLastLine().startsWith('(gdb)')) {
-                        this.process.remove('data', launchLogger);
-                    } else {
-                        this.log('warning', data);
-                    }
-                };
-
-                this.process.on('data', launchLogger);
-
-                this.process.Run(exe, args, { encoding: 'utf8' });
-            } catch (error) {
-                resolve((<Error>error).message);
-            }
+        this.cmdQueue.on('error', (err) => {
+            this.log('error', `${err.message} : \r\n${err.stack}`);
         });
+
+        // log launch msg
+        const launchHandler = (data: CommandResult) => {
+            if (data.id === CommandQueue.NULL_ID) {
+                this.cmdQueue.removeListener('lines', launchHandler);
+                this.log('warning', data.lines.join('\r\n'));
+            }
+        };
+
+        this.cmdQueue.on('lines', launchHandler);
+
+        return await this.cmdQueue.launch(exe, args);
     }
 
     async kill(): Promise<void> {
-        await this.process.Kill();
+        await this.cmdQueue.kill();
     }
 
-    isRunning(): boolean {
-        return !this.process.IsExit();
-    }
+    sendCommand(command: string, funcName: string, logType: LogType = 'log'): Promise<GdbResult> {
 
-    async sendCommand(command: string, funcName: string, logType: LogType = 'log'): Promise<GdbResult> {
+        return new Promise((resolve) => {
 
-        return new Promise(async (resolve) => {
+            const id = this.obtainID();
 
-            const strBuf = new StringBuffer();
+            const dathandler = (data: CommandResult) => {
 
-            const dataHandler = (chunk: string) => {
-
-                strBuf.append(chunk);
-
-                if (strBuf.getLastLine().startsWith('(gdb)')) {
-
-                    const lines = strBuf.toList();
-                    lines.splice(lines.length - 1);
-                    this.process.remove('data', dataHandler);
+                if (data.id === id) {
+                    const lines = data.lines;
+                    this.cmdQueue.removeListener('lines', dathandler);
 
                     if (logType !== 'hide') {
                         this.log(logType, `[SEND]: ${command}`);
@@ -385,22 +368,24 @@ export class GDB implements IGDB {
                 }
             };
 
-            this.process.on('data', dataHandler);
+            this.cmdQueue.on('lines', dathandler);
 
-            // normal command
+            // send command
             if (command !== this.COMMAND_INTRRUPT) {
-                const err = await this.process.write(`${command}\r\n`);
-                if (err) {
-                    this.log('error', err.message);
-                    resolve({
-                        resultType: 'failed',
-                        data: Object.create(null),
-                        logs: []
-                    });
-                }
+                this.cmdQueue.once('write-done', (data) => {
+                    if (data.id === id && data.err) {
+                        this.log('error', data.err.message);
+                        resolve({
+                            resultType: 'failed',
+                            data: Object.create(null),
+                            logs: []
+                        });
+                    }
+                });
+                this.cmdQueue.writeLine(id, `${command}`);
             } else {
                 try {
-                    this.process.signal(this.SIGNAL_INTRRUPT);
+                    this.cmdQueue.signal(id, this.SIGNAL_INTRRUPT);
                 } catch (err) {
                     this.log('error', err.message);
                     resolve({
@@ -411,6 +396,158 @@ export class GDB implements IGDB {
                 }
             }
         });
+    }
+}
+
+class Queue<T> {
+
+    private list: T[];
+
+    constructor() {
+        this.list = [];
+    }
+
+    count(): number {
+        return this.list.length;
+    }
+
+    enqueue(data: T) {
+        this.list.push(data);
+    }
+
+    dequeue(): T | undefined {
+        if (this.list.length > 0) {
+            const data = this.list[0];
+            this.list.splice(0, 1);
+            return data;
+        }
+        return undefined;
+    }
+}
+
+//---
+
+interface CommandResult {
+    id: number;
+    lines: string[];
+}
+
+interface CommandData {
+    id: number;
+    line: string;
+}
+
+interface WriteResult {
+    id: number;
+    err: Error | undefined | null;
+}
+
+class CommandQueue {
+
+    public static readonly NULL_ID = -1;
+
+    private _event: EventEmitter;
+    private strBuf = new StringBuffer();
+
+    private idQueue: Queue<number> = new Queue();
+    private cmdQueue: Queue<CommandData> = new Queue();
+    private writeBusy: boolean = false;
+
+    private proc: Executable;
+
+    constructor() {
+        this._event = new EventEmitter();
+        this.proc = new ExeFile();
+    }
+
+    launch(exe: string, args?: string[]): Promise<ErrorMsg | null> {
+
+        return new Promise((resolve) => {
+
+            this.proc.on('launch', (launchOk) => {
+                if (launchOk) {
+                    resolve();
+                } else {
+                    resolve('GDB launch failed !');
+                }
+            });
+
+            this.proc.on('error', (err) => {
+                this._event.emit('error', err);
+            });
+
+            this.proc.Run(exe, args, { encoding: 'utf8' });
+
+            this.proc.stdout.on('data', (chunk) => this.onData(chunk));
+        });
+    }
+
+    signal(id: number, sig: NodeJS.Signals) {
+        this.idQueue.enqueue(id);
+        this.proc.signal(sig);
+    }
+
+    async kill() {
+        await this.proc.Kill();
+    }
+
+    on(event: 'error', lisenter: (err: Error) => void): void;
+    on(event: 'lines', lisenter: (data: CommandResult) => void): void;
+    on(event: any, lisenter: (arg: any) => void): void {
+        this._event.on(event, lisenter);
+    }
+
+    once(event: 'write-done', lisenter: (result: WriteResult) => void): void;
+    once(event: any, lisenter: (arg: any) => void): void {
+        this._event.once(event, lisenter);
+    }
+
+    removeListener(event: 'lines', listener: (argc: any) => void) {
+        this._event.removeListener(event, listener);
+    }
+
+    writeLine(id: number, line: string): void {
+
+        this.idQueue.enqueue(id);
+
+        if (this.writeBusy) {
+            this.writeWait(id, `${line}\r\n`);
+        } else {
+            this.writeBusy = true;
+            this.proc.stdin.write(`${line}\r\n`, (err) => {
+                this._event.emit('write-done', <WriteResult>{ id: id, err: err });
+            });
+        }
+    }
+
+    private writeWait(id: number, line: string): void {
+        this.cmdQueue.enqueue({ id: id, line: line });
+    }
+
+    private onData(chunk: string) {
+
+        this.strBuf.append(chunk);
+
+        if (this.strBuf.getLastLine().startsWith('(gdb)')) {
+
+            // send data
+            const lines = this.strBuf.toList();
+            this.strBuf.clear();
+            lines.splice(lines.length - 1);
+            const id = this.idQueue.count() > 0 ? <number>this.idQueue.dequeue() : CommandQueue.NULL_ID;
+            this._event.emit('lines', <CommandResult>{ id: id, lines: lines });
+
+            // next one
+            if (this.cmdQueue.count() > 0) {
+                this.writeBusy = true;
+                const data = <CommandData>this.cmdQueue.dequeue();
+                this.proc.stdin.write(data.line, (err) => {
+                    this._event.emit('write-done', <WriteResult>{ id: data.id, err: err });
+                });
+            } else {
+                this.writeBusy = false;
+            }
+        }
     }
 }
 
@@ -645,6 +782,68 @@ class GdbParser {
         }
     }
 
+    // test: {a={a=0,c=90,d={a="{}"}},b=90}
+    private splitObj(_str: string) {
+
+        const str = _str
+            .replace(/^\s*\{/, '')
+            .replace(/\}\s*$/, '');
+
+        const resList: string[] = [];
+        const stack: string[] = [];
+
+        let iStart = 0;
+        let inString = false;
+        const endIndex = str.length - 1;
+
+        for (let index = 0; index < str.length; index++) {
+            const char = str[index];
+            switch (char) {
+                case '{':
+                    if (!inString) {
+                        stack.push(char);
+                    }
+                    break;
+                case '}':
+                    if (!inString) {
+                        stack.pop();
+                        if (stack.length === 0 && index === endIndex) {
+                            resList.push(str.substring(iStart, index + 1));
+                        }
+                    }
+                    break;
+                case '\'':
+                case '"':
+                    if (index === 0 || str[index - 1] !== '\\') {
+                        if (stack.length > 0 && stack[stack.length - 1] === char) {
+                            inString = false;
+                            stack.pop();
+                            if (stack.length === 0 && index === endIndex) {
+                                resList.push(str.substring(iStart, index + 1));
+                            }
+                        } else {
+                            inString = true;
+                            stack.push(char);
+                        }
+                    }
+                    break;
+                case ',':
+                    if (stack.length === 0) {
+                        resList.push(str.substring(iStart, index));
+                        iStart = index + 1;
+                    }
+                    break;
+                default:
+                    if (stack.length === 0 && index === endIndex) {
+                        resList.push(str.substring(iStart, index + 1));
+                    }
+                    break;
+            }
+        }
+
+        return resList;
+    }
+
     private parseVariable(name: string, val: string): Variable {
 
         const rootObj = this.parseUnit(name, val);
@@ -673,8 +872,9 @@ class GdbParser {
         while (parseList.length > 0) {
 
             const tVar = <Variable>parseList.pop();
-            const varArr = (<string>tVar.value).substring(1, val.length - 1)
-                .split(',').map((item) => { return item.trim(); });
+            const varArr = this.splitObj(<string>tVar.value).map((item) => { 
+                return item.trim(); 
+            });
 
             // init obj
             tVar.value = [];
