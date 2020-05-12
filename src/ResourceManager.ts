@@ -43,6 +43,10 @@ export class ResourceManager {
         return this.getAppConfig().get<boolean>('UseVerboseMode') || false;
     }
 
+    parseString2Array(): boolean {
+        return this.getAppConfig().get<boolean>('ParseStringToArray') || false;
+    }
+
     //---
 
     private init() {

@@ -60,12 +60,15 @@ export class DebugAdapter extends DebugSession {
     private bpMap: Map<string, IGDB.Breakpoint[]> = new Map();
     private preLoadBPMap: Map<string, IGDB.Breakpoint[]> = new Map();
 
+    private stringAsArray: boolean;
+
     constructor() {
         super();
 
         this.vHandles = new Handles(DebugAdapter.HANLER_START);
         this.cwd = <File>ResourceManager.getInstance().getWorkspaceDir();
         this.gdb = new GDB(ResourceManager.getInstance().isVerboseMode());
+        this.stringAsArray = ResourceManager.getInstance().parseString2Array();
 
         this.setDebuggerColumnsStartAt1(false);
         this.setDebuggerLinesStartAt1(false);
@@ -130,27 +133,30 @@ export class DebugAdapter extends DebugSession {
                 result.value = 'struct {...}';
                 result.variablesReference = this.cacheChild(<IGDB.VariableChildren>_var.value);
                 break;
-            case 'string': // conver a string to a array
+            case 'string':
                 {
                     const value: string = <string>_var.value;
 
                     result.value = `"${value}"`;
                     result.type = _var.type;
 
-                    const cArr = Array.from(value).map((_char, index) => {
-                        return <IGDB.Variable>{
-                            name: index.toString(),
+                    // conver a string to an array
+                    if (this.stringAsArray) {
+                        const cArr = Array.from(value).map((_char, index) => {
+                            return <IGDB.Variable>{
+                                name: index.toString(),
+                                type: 'integer',
+                                value: _char.charCodeAt(0).toString()
+                            };
+                        });
+                        // add '\0' suffix
+                        cArr.push({
+                            name: cArr.length.toString(),
                             type: 'integer',
-                            value: _char.charCodeAt(0).toString()
-                        };
-                    });
-                    // add '\0' suffix
-                    cArr.push({
-                        name: cArr.length.toString(),
-                        type: 'integer',
-                        value: '0'
-                    });
-                    result.variablesReference = this.cacheChild(cArr);
+                            value: '0'
+                        });
+                        result.variablesReference = this.cacheChild(cArr);
+                    }
                 }
                 break;
             default:

@@ -45,6 +45,11 @@
                     "markdownDescription": "`verbose mode` means output more log to debug terminal",
                     "type": "boolean",
                     "default": false
+                },
+                "stm8-debug.ParseStringToArray": {
+                    "markdownDescription": "make string variable as an char array",
+                    "type": "boolean",
+                    "default": false
                 }
             }
         },
