@@ -44,5 +44,5 @@ A STM8 Debugger for vscode. Use GDB to debug your STM8 program
 
 ## Attention 🚩
 
-- **The file path must contain only ASCII characters**
+- #### The file path must contain only ASCII characters
 
