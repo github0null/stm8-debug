@@ -38,7 +38,7 @@ export interface Stack {
     line: number | null;
 }
 
-export type ValueType = 'string' | 'integer' | 'float' | 'obj' | 'array';
+export type ValueType = 'string' | 'integer' | 'float' | 'obj' | 'array' | 'orignal';
 
 export type VariableChildren = Variable[];
 

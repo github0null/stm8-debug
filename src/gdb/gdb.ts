@@ -625,8 +625,7 @@ class GdbParser {
     private readonly valueMatcher = {
         'integer': /^\d+|0x[0-9a-f]+$/,
         'float': /^\d+.\d+[ufld]$/i,
-        'repeatedArray': /^\{([^<]+) <repeats (\d+) times>\}$/,
-        'array': /^\{[^\{\}=]+\}$/,
+        'repeatedArray': /^\{.+ <repeats \d+ times>\}$/,
         'string': /^".+"$/,
         'originalValue': /^[^\{\}]+$/
     };
@@ -799,7 +798,7 @@ class GdbParser {
     }
 
     // test: {a={a=0,c=90,d={a="{}"}},b=90}
-    private splitObj(_str: string) {
+    private splitObj(_str: string): string[] {
 
         const str = _str
             .replace(/^\s*\{/, '')
@@ -896,14 +895,21 @@ class GdbParser {
             tVar.value = [];
 
             // parse
-            varArr.forEach((item) => {
-                const keyVal = extractVar(item);
+            varArr.forEach((strItem, index) => {
+
+                const keyVal = extractVar(strItem);
+
+                let retVar: Variable;
                 if (keyVal) {
-                    const retVar = this.parseUnit(keyVal.k, keyVal.v);
-                    (<Variable[]>tVar.value).push(retVar);
-                    if (retVar.type === 'obj') {
-                        parseList.push(retVar);
-                    }
+                    retVar = this.parseUnit(keyVal.k, keyVal.v);
+                } else {
+                    retVar = this.parseUnit(index.toString(), strItem);
+                    tVar.type = 'array';
+                }
+
+                (<Variable[]>tVar.value).push(retVar);
+                if (retVar.type === 'obj') {
+                    parseList.push(retVar);
                 }
             });
         }
@@ -972,41 +978,10 @@ class GdbParser {
         // repeat array
         // {0 <repeats 12 times>}
         if (this.valueMatcher['repeatedArray'].test(val)) {
-            const match = this.valueMatcher['repeatedArray'].exec(val);
-            if (match && match.length > 2) {
-                const res: string[] = [];
-                const len = parseInt(match[2]);
-                for (let i = 0; i < len; i++) {
-                    res.push(match[1]);
-                }
-                return {
-                    name: name,
-                    type: 'array',
-                    value: res.map((item, index) => {
-                        return <Variable>{
-                            name: index.toString(),
-                            type: 'string',
-                            value: item
-                        };
-                    })
-                };
-            }
-        }
-
-        // {12, 16 '\020', 0x002}
-        if (this.valueMatcher['array'].test(val)) {
-            const arr = val.substring(1, val.length - 1)
-                .split(',').map((item) => { return item.trim(); });
             return {
                 name: name,
-                type: 'array',
-                value: arr.map((item, index) => {
-                    return <Variable>{
-                        name: index.toString(),
-                        type: 'string',
-                        value: item
-                    };
-                })
+                type: 'orignal',
+                value: val.substring(1, val.length - 1)
             };
         }
 
@@ -1023,10 +998,11 @@ class GdbParser {
 
         // string
         if (this.valueMatcher['string'].test(val)) {
+            const realStr = val.substring(1, val.length - 1);
             return {
                 name: name,
                 type: 'string',
-                value: val.substring(1, val.length - 1)
+                value: realStr
             };
         }
 
@@ -1034,7 +1010,7 @@ class GdbParser {
         if (this.valueMatcher['originalValue'].test(val)) {
             return {
                 name: name,
-                type: 'string',
+                type: 'orignal',
                 value: val
             };
         }

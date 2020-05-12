@@ -130,6 +130,29 @@ export class DebugAdapter extends DebugSession {
                 result.value = 'struct {...}';
                 result.variablesReference = this.cacheChild(<IGDB.VariableChildren>_var.value);
                 break;
+            case 'string': // conver a string to a array
+                {
+                    const value: string = <string>_var.value;
+
+                    result.value = `"${value}"`;
+                    result.type = _var.type;
+
+                    const cArr = Array.from(value).map((_char, index) => {
+                        return <IGDB.Variable>{
+                            name: index.toString(),
+                            type: 'integer',
+                            value: _char.charCodeAt(0).toString()
+                        };
+                    });
+                    // add '\0' suffix
+                    cArr.push({
+                        name: cArr.length.toString(),
+                        type: 'integer',
+                        value: '0'
+                    });
+                    result.variablesReference = this.cacheChild(cArr);
+                }
+                break;
             default:
                 result.value = <string>_var.value;
                 result.type = _var.type;
