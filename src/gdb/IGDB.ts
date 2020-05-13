@@ -33,9 +33,11 @@ export interface Breakpoint {
 export interface Stack {
     level: number;
     function: string;
+    address: string | null;
     fileName: string | null;
     file: string | null;
     line: number | null;
+    paramsList: Variable[] | null;
 }
 
 export type ValueType = 'string' | 'integer' | 'float' | 'obj' | 'array' | 'orignal';
@@ -100,7 +102,7 @@ export interface IGDB {
 
     removeBreakpoints(breakpoints: number[]): Promise<boolean>;
 
-    getStack(threadID?: number, startFrame?: number, endFrame?: number): Promise<Stack[]>;
+    getStack(startFrame: number, endFrame: number): Promise<Stack[]>;
 
     getLocalVariables(): Promise<Variable[]>;
 

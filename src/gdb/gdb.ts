@@ -205,14 +205,11 @@ export class GDB implements IGDB {
         });
     }
 
-    getStack(threadID?: number, startFrame?: number, endFrame?: number): Promise<Stack[]> {
+    getStack(startFrame: number, endFrame: number): Promise<Stack[]> {
         return new Promise((resolve, reject) => {
             this.sendCommand(`bt`, this.getStack.name, this.hiddenMsgType).then((result) => {
-                let stack: Stack[] = [];
-                if (result.data.stack) {
-                    stack = result.data.stack;
-                }
-                resolve(stack);
+                const stack = result.data.stack || [];
+                resolve(stack.slice(startFrame, endFrame));
             }, reject);
         });
     }
@@ -616,18 +613,20 @@ class GdbParser {
         'expression': /^\s*([\w\$]+)\s*=\s*(.+)$/,
         'varDefine': /(\w+)(?:\[\w+\])?(?:\s*=\s*[^;]+)?;$/,
         'register': /^([\w\:\?]+)\s*(0x[0-9a-f]+)\s*\d+$/,
-        'vaildStack': /^#(\d+) .* (\S+ \(.*\)) at (.+):(\d+)$/i,
-        'anonymousStack': /^#(\d+) .* (\S+ \(\))$/i,
+        'vaildStack': /^#(\d+) (.*) (\S+) \((.*)\) at (.+):(\d+)$/i,
+        'anonymousStack': /^#(\d+) (.*) (\S+ \(\))$/i,
+        'stackAddress': /^(0x[0-9a-f]+) in$/i,
         'breakpoint': /^Breakpoint (\d+) [^:]+: file ([^,]+), line (\d+)/,
         'stopLine': /\S+ at (.+):(\d+)$/,
         'stopFunc': /(\d+)\s*\w+\s*\(.*\)\s*;$/
     };
+
     private readonly valueMatcher = {
-        'integer': /^\d+|0x[0-9a-f]+$/,
+        'integer': /^\d+|0x[0-9a-f]+$/i,
         'float': /^\d+.\d+[ufld]$/i,
         'repeatedArray': /^\{.+ <repeats \d+ times>\}$/,
-        'string': /^".+"$/,
-        'originalValue': /^[^\{\}]+$/
+        'string': /^".*"$/,
+        'objectValue': /^\{.+\}$/
     };
 
     constructor(gdb: GDB) {
@@ -696,15 +695,29 @@ class GdbParser {
                     */
                     if (this.regexpList['vaildStack'].test(line)) {
                         const match = this.regexpList['vaildStack'].exec(line);
-                        if (match && match.length > 4) {
+                        if (match && match.length > 6) {
+
+                            let addr: string | null = null;
+                            const mList = this.regexpList['stackAddress'].exec(match[2].trim());
+                            if (mList && mList.length > 1) {
+                                addr = mList[1];
+                            }
 
                             const _stack: Stack = {
                                 level: parseInt(match[1]),
-                                function: match[2],
-                                file: match[3],
-                                fileName: path.basename(match[3]),
-                                line: parseInt(match[4])
+                                address: addr,
+                                function: `${match[3]} ()`,
+                                file: match[5],
+                                fileName: path.basename(match[5]),
+                                line: parseInt(match[6]),
+                                paramsList: null
                             };
+
+                            // parse func params values
+                            const localVar = this.parseVariable(`__`, `{${match[4].trim()}}`);
+                            if (Array.isArray(localVar.value) && localVar.value.length > 0) {
+                                _stack.paramsList = localVar.value;
+                            }
 
                             if (result.data.stack) {
                                 result.data.stack.push(_stack);
@@ -717,14 +730,22 @@ class GdbParser {
 
                     // #2  0x008719 in .near_func.text_4 ()
                     if (this.regexpList['anonymousStack'].test(line)) {
-                        const matcher = this.regexpList['anonymousStack'].exec(line);
-                        if (matcher && matcher.length > 2) {
+                        const match = this.regexpList['anonymousStack'].exec(line);
+                        if (match && match.length > 3) {
+
+                            let addr: string | null = null;
+                            const mList = this.regexpList['stackAddress'].exec(match[2].trim());
+                            if (mList && mList.length > 1) {
+                                addr = mList[1];
+                            }
 
                             const _stack: Stack = {
-                                level: parseInt(matcher[1]),
-                                function: matcher[2],
+                                level: parseInt(match[1]),
+                                address: addr,
+                                function: match[3],
                                 file: null,
                                 fileName: null,
+                                paramsList: null,
                                 line: null
                             };
 
@@ -1006,19 +1027,19 @@ class GdbParser {
             };
         }
 
-        // original string
-        if (this.valueMatcher['originalValue'].test(val)) {
+        // obj
+        if (this.valueMatcher['objectValue'].test(val)) {
             return {
                 name: name,
-                type: 'orignal',
+                type: 'obj',
                 value: val
             };
         }
 
-        // obj
+        // original string
         return {
             name: name,
-            type: 'obj',
+            type: 'orignal',
             value: val
         };
     }

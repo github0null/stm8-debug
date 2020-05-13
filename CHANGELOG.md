@@ -2,6 +2,10 @@
 
 All notable changes to the "stm8-debug" extension will be documented in this file.
 
+## [v0.1.2]
+- add function arguments
+***
+
 ## [v0.1.1]
 - support more value type
 ***

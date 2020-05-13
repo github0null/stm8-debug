@@ -37,6 +37,7 @@ export interface LaunchArguments extends DebugProtocol.LaunchRequestArguments, I
 enum ScopeType {
     SCOPE_GLOBAL = 1, // ID must > 0
     SCOPE_LOCAL,
+    SCOPE_FUNC_PARAMS,
     SCOPE_REGISTER
 }
 
@@ -53,14 +54,17 @@ export class DebugAdapter extends DebugSession {
 
     private configDoneEmitter: Subject = new Subject();
     private isConnected: boolean = false;
+    private stringAsArray: boolean;
 
-    private vHandles: Handles<Variable[]>;
     private globalVars: string[] = [];
+    private vHandles: Handles<Variable[]>;
     private rootVariables: Map<ScopeType, Variable[]> = new Map();
+
+    private frameChanged = false;
+    private funcArguments: IGDB.Variable[] = [];
+
     private bpMap: Map<string, IGDB.Breakpoint[]> = new Map();
     private preLoadBPMap: Map<string, IGDB.Breakpoint[]> = new Map();
-
-    private stringAsArray: boolean;
 
     constructor() {
         super();
@@ -100,7 +104,10 @@ export class DebugAdapter extends DebugSession {
         this.sendEvent(new OutputEvent(`${line}\r\n`, 'stderr'));
     }
 
+    //---
+
     private cacheChild(children: IGDB.VariableChildren): number {
+
         return this.vHandles.create(children.map((item) => {
             const vTemp = new Variable(item.name, '', DebugAdapter.HANLER_NULL);
             switch (item.type) {
@@ -118,6 +125,10 @@ export class DebugAdapter extends DebugSession {
             }
             return vTemp;
         }));
+    }
+
+    private vClearAll() {
+        this.vHandles.reset();
     }
 
     private vToVariable(_var: IGDB.Variable): Variable {
@@ -169,25 +180,22 @@ export class DebugAdapter extends DebugSession {
     }
 
     private vGetChildren(ref: number): Variable[] {
-        if (ref >= DebugAdapter.HANLER_START) {
-            return this.vHandles.get(ref);
-        }
-        return [];
+        return this.vHandles.get(ref) || [];
     }
 
     private vGetRoot(name: string): Variable | undefined {
-        for (const vList of this.rootVariables.values()) {
-            const index = vList.findIndex((v) => { return v.name === name; });
+
+        for (const rootList of this.rootVariables.values()) {
+            const index = rootList.findIndex((v) => { return v.name === name; });
             if (index !== -1) {
-                return vList[index];
+                return rootList[index];
             }
         }
+
         return undefined;
     }
 
-    private vClear() {
-        this.vHandles.reset();
-    }
+    //---
 
     private createSource(_path: string): Source {
         if (path.isAbsolute(_path)) {
@@ -423,12 +431,30 @@ export class DebugAdapter extends DebugSession {
         const maxLevels = typeof args.levels === 'number' ? args.levels : 100;
         const endFrame = startFrame + maxLevels;
 
-        this.gdb.getStack(args.threadId, startFrame, endFrame).then((stack) => {
+        // clear frame data
+        this.frameChanged = true;
+        this.funcArguments = [];
+
+        // clear all variables
+        this.vClearAll();
+
+        this.gdb.getStack(startFrame, endFrame).then((stack) => {
+
+            // init current frame's params
+            if (stack.length > 0) {
+                this.funcArguments = stack[0].paramsList || [];
+            }
+
             response.body = {
+
                 stackFrames: stack.map((frame) => {
+
+                    const funcName: string = frame.address ?
+                        (`${frame.address} ${frame.function}`) : frame.function;
+
                     return <DebugProtocol.StackFrame>{
                         id: frame.level,
-                        name: frame.function,
+                        name: funcName,
                         line: frame.line || 0,
                         source: frame.file ? this.createSource(frame.file) : undefined,
                         column: 0,
@@ -436,6 +462,7 @@ export class DebugAdapter extends DebugSession {
                 }),
                 totalFrames: stack.length
             };
+
             this.sendResponse(response);
         });
     }
@@ -448,13 +475,12 @@ export class DebugAdapter extends DebugSession {
             this.globalVars = vDefines.map((item) => { return item.name; });
         }
 
-        this.vClear();
-
         response.body = {
             scopes: [
-                new Scope("Global", ScopeType.SCOPE_GLOBAL, true),
-                new Scope("Local", ScopeType.SCOPE_LOCAL, false),
-                new Scope("Register", ScopeType.SCOPE_REGISTER, true)
+                new Scope("Globals", ScopeType.SCOPE_GLOBAL, true),
+                new Scope("Locals", ScopeType.SCOPE_LOCAL, false),
+                new Scope("Arguments", ScopeType.SCOPE_FUNC_PARAMS, false),
+                new Scope("Registers", ScopeType.SCOPE_REGISTER, true)
             ]
         };
 
@@ -468,38 +494,51 @@ export class DebugAdapter extends DebugSession {
         // is scope
         if (args.variablesReference < DebugAdapter.HANLER_START) {
 
+            // update func arguments
+            if (this.frameChanged) {
+                this.frameChanged = false;
+                const funcArguments = this.funcArguments.map((_var) => { return this.vToVariable(_var); });
+                this.rootVariables.set(ScopeType.SCOPE_FUNC_PARAMS, funcArguments);
+            }
+
             const scopeType = <ScopeType>args.variablesReference;
 
-            if (scopeType === ScopeType.SCOPE_GLOBAL) {
-                for (const name of this.globalVars) {
-                    const _var = await this.gdb.getVariableValue(name);
-                    if (_var) {
-                        response.body.variables.push(this.vToVariable(_var));
+            switch (scopeType) {
+                case ScopeType.SCOPE_GLOBAL:
+                    for (const name of this.globalVars) {
+                        const _var = await this.gdb.getVariableValue(name);
+                        if (_var) {
+                            response.body.variables.push(this.vToVariable(_var));
+                        }
                     }
-                }
+                    break;
+                case ScopeType.SCOPE_LOCAL:
+                    const variables = await this.gdb.getLocalVariables();
+                    if (variables) {
+                        response.body.variables = variables.map((_var) => {
+                            return this.vToVariable(_var);
+                        });
+                    }
+                    break;
+                case ScopeType.SCOPE_REGISTER:
+                    const vList = await this.gdb.getRegisterVariables();
+                    if (vList) {
+                        response.body.variables = vList.map((_v) => {
+                            return this.vToVariable(_v);
+                        });
+                    }
+                    break;
+                case ScopeType.SCOPE_FUNC_PARAMS:
+                    response.body.variables = this.rootVariables.get(scopeType) || [];
+                    break;
+                default:
+                    break;
             }
 
-            if (scopeType === ScopeType.SCOPE_LOCAL) {
-                const variables = await this.gdb.getLocalVariables();
-                if (variables) {
-                    response.body.variables = variables.map((_var) => {
-                        return this.vToVariable(_var);
-                    });
-                }
-            }
-
-            if (scopeType === ScopeType.SCOPE_REGISTER) {
-                const vList = await this.gdb.getRegisterVariables();
-                if (vList) {
-                    response.body.variables = vList.map((_v) => {
-                        return this.vToVariable(_v);
-                    });
-                }
-            }
-
-            // update var root
+            // update scope var root
             this.rootVariables.set(scopeType, response.body.variables);
             this.sendResponse(response);
+
         } else {
             response.body.variables = this.vGetChildren(args.variablesReference);
             this.sendResponse(response);
@@ -543,7 +582,7 @@ export class DebugAdapter extends DebugSession {
         });
     }
 
-    private searchVariable(expression: string): DebugProtocol.Variable | undefined {
+    private searchVariable(expression: string, frameID?: number): DebugProtocol.Variable | undefined {
 
         let nameList: string[] = expression.split(/\.|->/).filter((name) => { return name !== ''; });
         if (nameList.length === 0) {
@@ -583,9 +622,7 @@ export class DebugAdapter extends DebugSession {
                 response.body = {
                     result: _var.value,
                     variablesReference: _var.variablesReference,
-                    presentationHint: {
-                        kind: 'property'
-                    }
+                    presentationHint: { kind: 'property' }
                 };
                 this.sendResponse(response);
             }
