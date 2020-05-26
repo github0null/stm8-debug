@@ -4,7 +4,8 @@ import { File } from '../lib/node-utility/File';
 let _instance: ResourceManager | undefined;
 
 const dirList: string[] = [
-    File.sep + 'bin'
+    `${File.sep}bin`,
+    `${File.sep}data${File.sep}svd`
 ];
 
 export class ResourceManager {
@@ -35,6 +36,10 @@ export class ResourceManager {
         return <File>this.dirMap.get('bin');
     }
 
+    getSvdDir(): File {
+        return <File>this.dirMap.get('svd');
+    }
+
     getWorkspaceDir(): File | null {
         return this.workspaceDir;
     }
@@ -60,7 +65,7 @@ export class ResourceManager {
         for (const path of dirList) {
             const f = new File(this.extensionDir.path + path);
             if (f.IsDir()) {
-                this.dirMap.set(f.noSuffixName, f);
+                this.dirMap.set(f.name, f);
             }
         }
     }

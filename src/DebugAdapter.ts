@@ -1,12 +1,15 @@
-import { DebugSession, OutputEvent, TerminatedEvent, Source, Scope, Handles, Variable, StoppedEvent, InitializedEvent, BreakpointEvent, Breakpoint, ContinuedEvent } from 'vscode-debugadapter';
+import {
+    DebugSession, OutputEvent, TerminatedEvent, Source, Scope, Handles,
+    StoppedEvent, InitializedEvent, BreakpointEvent, Breakpoint, ContinuedEvent
+} from 'vscode-debugadapter';
+import * as vsDebugAdapter from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
 import { GDB } from './gdb/gdb';
 import * as IGDB from './gdb/IGDB';
 import { ResourceManager } from './ResourceManager';
 import { File } from '../lib/node-utility/File';
-import { Writable } from 'stream';
 import { EventEmitter } from 'events';
-import * as path from 'path';
+import * as NodePath from 'path';
 import * as vscode from 'vscode';
 
 class Subject {
@@ -31,14 +34,45 @@ class Subject {
 }
 
 export interface LaunchArguments extends DebugProtocol.LaunchRequestArguments, IGDB.ConnectOption {
+    svdFile?: string;
     runToMain?: boolean;
+}
+
+interface RegisterField {
+    name: string;
+    bitsOffset: number;
+    bitsWidth: number;
+}
+
+interface PeriphRegister {
+    name: string;
+    baseAddress?: string;
+    bytes: number;
+    fields?: RegisterField[];
+}
+
+interface Peripheral {
+    name: string;
+    baseAddress: string;
+    registers: PeriphRegister[];
+}
+
+interface SvdFilter {
+    file: File;
+    regexp: RegExp;
 }
 
 enum ScopeType {
     SCOPE_GLOBAL = 1, // ID must > 0
     SCOPE_LOCAL,
     SCOPE_FUNC_PARAMS,
-    SCOPE_REGISTER
+    SCOPE_REGISTER,
+    SCOPE_PERIPHERAL
+}
+
+// override Variable
+class Variable extends vsDebugAdapter.Variable {
+    vPath?: string;
 }
 
 export class DebugAdapter extends DebugSession {
@@ -59,6 +93,10 @@ export class DebugAdapter extends DebugSession {
     private globalVars: string[] = [];
     private vHandles: Handles<Variable[]>;
     private rootVariables: Map<ScopeType, Variable[]> = new Map();
+
+    private periphReferanceMap: Map<number, string> = new Map();
+    private peripherals: Peripheral[] = [];
+    private periphRegValueMap: Map<string, number> = new Map();
 
     private frameChanged = false;
     private funcArguments: IGDB.Variable[] = [];
@@ -180,7 +218,7 @@ export class DebugAdapter extends DebugSession {
     }
 
     private vGetChildren(ref: number): Variable[] {
-        return this.vHandles.get(ref) || [];
+        return this.vHandles.get(ref, []);
     }
 
     private vGetRoot(name: string): Variable | undefined {
@@ -198,11 +236,11 @@ export class DebugAdapter extends DebugSession {
     //---
 
     private createSource(_path: string): Source {
-        if (path.isAbsolute(_path)) {
-            return new Source(path.basename(_path), File.ToUri(_path));
+        if (NodePath.isAbsolute(_path)) {
+            return new Source(NodePath.basename(_path), File.ToUri(_path));
         } else {
-            const absPath = path.join(this.cwd.path, _path);
-            return new Source(path.basename(absPath), File.ToUri(absPath));
+            const absPath = NodePath.join(this.cwd.path, _path);
+            return new Source(NodePath.basename(absPath), File.ToUri(absPath));
         }
     }
 
@@ -233,6 +271,245 @@ export class DebugAdapter extends DebugSession {
         this.preLoadBPMap.clear();
     }
 
+    //--
+
+    private loadSvd(fPath: string) {
+
+        const svdFile = new File(fPath);
+
+        if (!svdFile.IsFile()) {
+            throw new Error(`not found file: ${svdFile.path}`);
+        }
+
+        try {
+            this.peripherals = <Peripheral[]>JSON.parse(svdFile.Read());
+        } catch (e) {
+            throw new Error(`incorrect json file format: ${(<Error>e).message}`);
+        }
+
+        try {
+            // check data format
+            this.peripherals.forEach((periph, index) => {
+
+                if (typeof periph.name !== 'string') {
+                    throw new Error(`'name' must be a string, peripheral index: ${index}`);
+                }
+
+                if (typeof periph.baseAddress !== 'string') {
+                    throw new Error(`'baseAddress' must be a string, at peripheral: ${periph.name}`);
+                }
+
+                if (!Array.isArray(periph.registers)) {
+                    throw new Error(`'registers' must be a array, at peripheral: ${periph.name}`);
+                }
+
+                let baseAddress = parseInt(periph.baseAddress);
+                let offset = 0;
+
+                periph.registers.forEach((reg, rIndex) => {
+
+                    if (typeof reg.name !== 'string') {
+                        throw new Error(`'name' must be a string, at peripheral: ${periph.name}, register index: ${rIndex}`);
+                    }
+
+                    if (typeof reg.bytes !== 'number') {
+                        throw new Error(`'bytes' must be a number, at peripheral: ${periph.name}, register: ${reg.name}`);
+                    }
+
+                    if (typeof reg.baseAddress !== 'string' && typeof reg.baseAddress !== 'undefined') {
+                        throw new Error(`'baseAddress' must be string or undefined, at peripheral: ${periph.name}, register: ${reg.name}`);
+                    }
+
+                    if (!Array.isArray(reg.fields) && typeof reg.fields !== 'undefined') {
+                        throw new Error(`'fields' must be array or undefined, at peripheral: ${periph.name}, register: ${reg.name}`);
+                    }
+
+                    if (reg.fields) {
+                        reg.fields.forEach((field) => {
+
+                            if (typeof field.name !== 'string') {
+                                throw new Error(`'fields' format error, at peripheral: ${periph.name}, register: ${reg.name}`);
+                            }
+
+                            if (typeof field.bitsOffset !== 'number') {
+                                throw new Error(`'fields' format error, at peripheral: ${periph.name}, register: ${reg.name}`);
+                            }
+
+                            if (typeof field.bitsWidth !== 'number') {
+                                throw new Error(`'fields' format error, at peripheral: ${periph.name}, register: ${reg.name}`);
+                            }
+                        });
+                    }
+
+                    // fill register address
+                    if (reg.baseAddress) {
+                        baseAddress = parseInt(reg.baseAddress);
+                        offset = 1;
+                    } else {
+                        reg.baseAddress = `0x${(baseAddress + offset).toString(16)}`;
+                        offset++;
+                    }
+                });
+            });
+        } catch (error) {
+            this.peripherals = [];
+            throw error;
+        }
+    }
+
+    private getSVDFilter(): SvdFilter[] {
+        return ResourceManager.getInstance()
+            .getSvdDir().GetList([/\.svd\.json$/], File.EMPTY_FILTER)
+            .map((file) => {
+                const cpuName = file.name.split('.')[0];
+                return {
+                    file: file,
+                    regexp: new RegExp(`^${cpuName}`, 'i')
+                };
+            });
+    }
+
+    private periphToVariables(): Variable[] {
+
+        // clear ptr map, value cache
+        this.periphReferanceMap.clear();
+        this.periphRegValueMap.clear();
+
+        return this.peripherals.map((periph) => {
+
+            const vPeriph = new Variable(`${periph.name}`,
+                `address ${periph.baseAddress}`, DebugAdapter.HANLER_NULL);
+
+            vPeriph.vPath = periph.name;
+
+            vPeriph.variablesReference = this.vHandles.create(periph.registers.map((register) => {
+
+                const vReg = new Variable(register.name, 'null', DebugAdapter.HANLER_NULL);
+
+                vReg.vPath = `${vPeriph.vPath}.${register.name}`;
+
+                const children = register.fields?.map((field) => {
+                    const vField = new Variable(field.name, 'null', DebugAdapter.HANLER_NULL);
+                    vField.vPath = `${vReg.vPath}.${field.name}`;
+                    return vField;
+                });
+
+                if (children) {
+                    vReg.variablesReference = this.vHandles.create(children);
+                    // add ptr to mapper
+                    this.periphReferanceMap.set(vReg.variablesReference, vReg.vPath);
+                }
+
+                return vReg;
+            }));
+
+            // add ptr to mapper
+            this.periphReferanceMap.set(vPeriph.variablesReference, vPeriph.vPath);
+
+            return vPeriph;
+        });
+    }
+
+    private isPeriphRef(ref: number): boolean {
+        return this.periphReferanceMap.has(ref);
+    }
+
+    private getPeriphByPath(vPath: string): Peripheral | PeriphRegister | RegisterField | undefined {
+
+        const nameList = vPath.split('.');
+
+        // search peripheral
+        if (nameList.length > 0) {
+            const pIndex = this.peripherals.findIndex((periph) => { return periph.name === nameList[0]; });
+            if (pIndex !== -1) {
+                const periph = this.peripherals[pIndex];
+
+                // search register
+                if (nameList.length > 1) {
+                    const regIndex = periph.registers.findIndex((reg) => { return reg.name === nameList[1]; });
+                    if (regIndex !== -1) {
+                        const register = periph.registers[regIndex];
+
+                        // search fields
+                        if (nameList.length > 2) {
+                            if (register.fields) {
+                                const fIndex = register.fields.findIndex((field) => { return field.name === nameList[2]; });
+                                if (fIndex !== -1) {
+                                    return register.fields[fIndex];
+                                }
+                            }
+                        } else {
+                            return register;
+                        }
+                    }
+                } else {
+                    return periph;
+                }
+            }
+        }
+    }
+
+    private async readPeriphRegisters(ref: number): Promise<Variable[]> {
+
+        const resultList: Variable[] = [];
+        const reqList: Variable[] = this.vHandles.get(ref, []);
+
+        for (const reqVar of reqList) {
+            if (reqVar.vPath) {
+                const nameList = reqVar.vPath.split('.');
+                // is registers
+                if (nameList.length === 2) {
+
+                    const register = <PeriphRegister>this.getPeriphByPath(reqVar.vPath);
+                    if (register) {
+                        const baseAddress = parseInt(<string>register.baseAddress);
+                        const mem = await this.gdb.readMemory(baseAddress, register.bytes);
+
+                        // check address, length
+                        if (mem.addr === baseAddress &&
+                            mem.buf.length === register.bytes) {
+
+                            // set value
+                            if (mem.buf.length === 1) {
+                                reqVar.value = `0x${mem.buf[0].toString(16)}`;
+                                // cache
+                                this.periphRegValueMap.set(reqVar.vPath, mem.buf[0]);
+                            } else {
+                                const hexList = mem.buf.map((num) => { return `0x${num.toString(16)}`; });
+                                reqVar.value = `[${hexList.join(',')}]`;
+                            }
+                        } else {
+                            // clear cache
+                            this.periphRegValueMap.delete(reqVar.vPath);
+                        }
+                    }
+
+                    resultList.push(reqVar);
+                }
+                // is fields
+                else if (nameList.length === 3) {
+
+                    const regValue = this.periphRegValueMap.get(`${nameList[0]}.${nameList[1]}`);
+                    const field = <RegisterField>this.getPeriphByPath(reqVar.vPath);
+
+                    if (field && typeof regValue !== 'undefined') {
+                        let mask = 0; // bit mask
+                        for (let i = 0; i < field.bitsWidth; i++) {
+                            mask = (mask << 1) | 1;
+                        }
+                        const fieldValue = (regValue >> field.bitsOffset) & mask;
+                        reqVar.value = `0x${fieldValue.toString(16)}`;
+                        resultList.push(reqVar);
+                    }
+                }
+            }
+        }
+
+        return resultList;
+    }
+
+    //--
+
     /**
 	 * The 'initialize' request is the first request called by the frontend
 	 * to interrogate the features the debug adapter provides.
@@ -246,6 +523,8 @@ export class DebugAdapter extends DebugSession {
         response.body.supportsConditionalBreakpoints = true;
         response.body.supportsRestartRequest = true;
         response.body.supportsTerminateRequest = true;
+
+        this.log(`================ Initialize ================\r\n`);
 
         const resManager = ResourceManager.getInstance();
         const gdbPath = resManager
@@ -314,6 +593,27 @@ export class DebugAdapter extends DebugSession {
                 `break main`
             ];
         }
+
+        // load svd
+        try {
+            if (args.svdFile) {
+                const absPath: string = NodePath.isAbsolute(args.svdFile)
+                    ? args.svdFile : NodePath.normalize(`${this.cwd.path}${File.sep}${args.svdFile}`);
+                this.log(`Load SVD: ${args.svdFile}`);
+                this.loadSvd(absPath);
+            } else {
+                const filters = this.getSVDFilter();
+                const index = filters.findIndex((item) => { return item.regexp.test(args.cpu); });
+                if (index !== -1) {
+                    this.log(`Load SVD: ${filters[index].file.name}`);
+                    this.loadSvd(filters[index].file.path);
+                }
+            }
+        } catch (e) {
+            this.error(`Load SVD failed !, msg: ${(<Error>e).message}`);
+        }
+
+        this.log(`\r\n================ Launch ================\r\n`);
 
         // start the program in the runtime
         this.isConnected = await this.gdb.connect(args, extraCommand);
@@ -480,7 +780,8 @@ export class DebugAdapter extends DebugSession {
                 new Scope("Globals", ScopeType.SCOPE_GLOBAL, true),
                 new Scope("Locals", ScopeType.SCOPE_LOCAL, false),
                 new Scope("Arguments", ScopeType.SCOPE_FUNC_PARAMS, false),
-                new Scope("Registers", ScopeType.SCOPE_REGISTER, true)
+                new Scope("Registers", ScopeType.SCOPE_REGISTER, true),
+                new Scope('Peripherals', ScopeType.SCOPE_PERIPHERAL, true)
             ]
         };
 
@@ -531,6 +832,9 @@ export class DebugAdapter extends DebugSession {
                 case ScopeType.SCOPE_FUNC_PARAMS:
                     response.body.variables = this.rootVariables.get(scopeType) || [];
                     break;
+                case ScopeType.SCOPE_PERIPHERAL:
+                    response.body.variables = this.periphToVariables();
+                    break;
                 default:
                     break;
             }
@@ -538,11 +842,19 @@ export class DebugAdapter extends DebugSession {
             // update scope var root
             this.rootVariables.set(scopeType, response.body.variables);
             this.sendResponse(response);
-
-        } else {
-            response.body.variables = this.vGetChildren(args.variablesReference);
-            this.sendResponse(response);
+            return;
         }
+
+        // is peripheral
+        if (this.isPeriphRef(args.variablesReference)) {
+            response.body.variables = await this.readPeriphRegisters(args.variablesReference);
+            this.sendResponse(response);
+            return;
+        }
+
+        // is variable
+        response.body.variables = this.vGetChildren(args.variablesReference);
+        this.sendResponse(response);
     }
 
     protected continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments): void {

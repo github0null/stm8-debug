@@ -2,6 +2,11 @@
 
 All notable changes to the "stm8-debug" extension will be documented in this file.
 
+## [v0.2.0]
+- support peripheral view
+- support custom peripheral SVD file
+***
+
 ## [v0.1.2]
 - add function arguments
 ***

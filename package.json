@@ -2,7 +2,7 @@
     "name": "stm8-debug",
     "displayName": "STM8 Debugger",
     "description": "STM8 Debugger for vscode",
-    "version": "0.1.2",
+    "version": "0.2.0",
     "publisher": "cl",
     "author": {
         "name": "cl",
@@ -344,6 +344,10 @@
                                 "description": "STLink port name, like: COM3",
                                 "default": "COM3"
                             },
+                            "svdFile": {
+                                "type": "string",
+                                "description": "STM8-Debug SVD json file path"
+                            },
                             "customCommands": {
                                 "type": "array",
                                 "description": "custom gdb commands, will run after gdb launched",
@@ -379,6 +383,12 @@
                         }
                     }
                 ]
+            }
+        ],
+        "jsonValidation": [
+            {
+                "fileMatch": "**/*.svd.json",
+                "url": "./lang/svd.verify.json"
             }
         ]
     },

@@ -4,4 +4,4 @@ node_modules
 *.vsix
 dist
 test
-**/Error.log
+**/*.log

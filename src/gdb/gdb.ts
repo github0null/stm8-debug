@@ -1,4 +1,4 @@
-import { IGDB, GdbResult, Breakpoint, Stack, Variable, ErrorMsg, VariableDefine, ResultData, ConnectOption, LogType, LogData } from "./IGDB";
+import { IGDB, GdbResult, Breakpoint, Stack, Variable, ErrorMsg, VariableDefine, ResultData, ConnectOption, LogType, LogData, Memory } from "./IGDB";
 import { EventEmitter } from 'events';
 import { Executable, ExeFile } from '../../lib/node-utility/Executable';
 import * as path from 'path';
@@ -22,7 +22,7 @@ export class GDB implements IGDB {
         this.parser = new GdbParser(this);
         this.cmdQueue = new CommandQueue();
         this.stopped = false;
-        this.hiddenMsgType = verbose ? undefined : 'hide';
+        this.hiddenMsgType = verbose ? 'log' : 'hide';
     }
 
     private log(label: LogType, msg: string): void {
@@ -220,7 +220,7 @@ export class GDB implements IGDB {
     */
     getLocalVariables(): Promise<Variable[]> {
         return new Promise((resolve, reject) => {
-            this.sendCommand(`info locals`, this.getLocalVariables.name).then((result) => {
+            this.sendCommand(`info locals`, this.getLocalVariables.name, this.hiddenMsgType).then((result) => {
                 if (result.resultType === 'done') {
                     let variables: Variable[] = [];
                     if (result.data.var) {
@@ -289,10 +289,22 @@ export class GDB implements IGDB {
      */
     getVariableValue(name: string): Promise<Variable> {
         return new Promise((resolve, reject) => {
-            this.sendCommand(`p ${name}`, this.getVariableValue.name).then((result) => {
+            this.sendCommand(`p ${name}`, this.getVariableValue.name, this.hiddenMsgType).then((result) => {
                 if (result.resultType === 'done' && result.data.var) {
                     result.data.var[0].name = name;
                     resolve(result.data.var[0]);
+                } else {
+                    resolve();
+                }
+            }, reject);
+        });
+    }
+
+    readMemory(addr: number, len: number): Promise<Memory> {
+        return new Promise((resolve, reject) => {
+            this.sendCommand(`x/${len}xb 0x${addr.toString(16)}`, this.readMemory.name, this.hiddenMsgType).then((result) => {
+                if (result.resultType === 'done' && result.data.memory) {
+                    resolve(result.data.memory);
                 } else {
                     resolve();
                 }
@@ -317,7 +329,9 @@ export class GDB implements IGDB {
         const launchHandler = (data: CommandResult) => {
             if (data.id === CommandQueue.NULL_ID) {
                 this.cmdQueue.removeListener('lines', launchHandler);
-                this.log('warning', data.lines.join('\r\n'));
+                if (data.lines.length > 0) {
+                    this.log('warning', data.lines.join('\r\n'));
+                }
             }
         };
 
@@ -618,7 +632,8 @@ class GdbParser {
         'stackAddress': /^(0x[0-9a-f]+) in$/i,
         'breakpoint': /^Breakpoint (\d+) [^:]+: file ([^,]+), line (\d+)/,
         'stopLine': /\S+ at (.+):(\d+)$/,
-        'stopFunc': /(\d+)\s*\w+\s*\(.*\)\s*;$/
+        'stopFunc': /(\d+)\s*\w+\s*\(.*\)\s*;$/,
+        'memValues': /^(0x[0-9a-f]+)\b.*:\s*(.+)\s*$/i
     };
 
     private readonly valueMatcher = {
@@ -807,6 +822,32 @@ class GdbParser {
                             result.data.var.push(variable);
                         } else {
                             result.data.var = [variable];
+                        }
+                    }
+                    return;
+                }
+                break;
+            case this.gdb.readMemory.name:
+                /**
+                 * (gdb) x/16xb 0x0
+                 * 0x0 <?w0>:	0x20	0x20	0xff	0x00	0xff	0x00	0xff	0x00
+                 * 0x8 <?w4>:	0xff	0x00	0xff	0x00	0xff	0x00	0xff	0x00
+                */
+                if (this.regexpList['memValues'].test(line)) {
+                    const match = this.regexpList['memValues'].exec(line);
+                    if (match && match.length > 2) {
+
+                        const vList: number[] = match[2]
+                            .split(/\s+/)
+                            .map((val) => { return parseInt(val); });
+
+                        if (result.data.memory) {
+                            result.data.memory.buf = result.data.memory.buf.concat(vList);
+                        } else {
+                            result.data.memory = {
+                                addr: parseInt(match[1]),
+                                buf: vList
+                            };
                         }
                     }
                     return;

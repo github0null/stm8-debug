@@ -15,6 +15,7 @@ export class ResultData {
     public var: Variable[] | null = null;
     public stack: Stack[] | null = null;
     public error: string | null = null;
+    public memory: Memory | null = null;
 }
 
 export interface GdbResult {
@@ -61,6 +62,11 @@ export interface ConnectOption {
     customCommands?: string[];
 }
 
+export interface Memory {
+    addr: number;
+    buf: number[];
+}
+
 export type ErrorMsg = string;
 
 export type LogType = 'warning' | 'log' | 'error' | 'hide';
@@ -81,7 +87,7 @@ export interface IGDB {
     sendCommand(command: string, funcName: string, logType: LogType): Promise<GdbResult>;
 
     //-- gdb commands --
-    
+
     isStopped(): boolean;
 
     connect(option: ConnectOption, otherCommand?: string[]): Promise<boolean>;
@@ -111,4 +117,6 @@ export interface IGDB {
     getGlobalVariables(): Promise<VariableDefine[]>;
 
     getRegisterVariables(): Promise<Variable[]>;
+
+    readMemory(addr: number, len: number): Promise<Memory>;
 }

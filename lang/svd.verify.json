@@ -1,0 +1,79 @@
+{
+    "title": "STM8-Debug SVD JSON",
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "type": "array",
+    "description": "peripheral list",
+    "items": {
+        "type": "object",
+        "description": "peripheral",
+        "required": [
+            "name",
+            "baseAddress",
+            "registers"
+        ],
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "peripheral name"
+            },
+            "baseAddress": {
+                "type": "string",
+                "description": "peripheral base address",
+                "pattern": "^0[xX][0-9a-fA-F]+$"
+            },
+            "registers": {
+                "type": "array",
+                "description": "register list",
+                "items": {
+                    "type": "object",
+                    "required": [
+                        "name",
+                        "bytes"
+                    ],
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "register name"
+                        },
+                        "bytes": {
+                            "type": "integer",
+                            "description": "register size"
+                        },
+                        "baseAddress": {
+                            "type": "string",
+                            "description": "register base address",
+                            "pattern": "^0[xX][0-9a-fA-F]+$"
+                        },
+                        "fields": {
+                            "type": "array",
+                            "description": "bits desciption list",
+                            "items": {
+                                "type": "object",
+                                "description": "bits datas",
+                                "required": [
+                                    "name",
+                                    "bitsOffset",
+                                    "bitsWidth"
+                                ],
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "description": "bits name"
+                                    },
+                                    "bitsOffset": {
+                                        "type": "integer",
+                                        "description": "bits offset"
+                                    },
+                                    "bitsWidth": {
+                                        "type": "integer",
+                                        "description": "bits width"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
