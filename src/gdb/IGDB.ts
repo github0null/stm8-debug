@@ -86,6 +86,8 @@ export interface IGDB {
 
     sendCommand(command: string, funcName: string, logType: LogType): Promise<GdbResult>;
 
+    getCommandTimeUsage(): number | undefined;
+
     //-- gdb commands --
 
     isStopped(): boolean;

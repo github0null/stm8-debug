@@ -2,6 +2,10 @@
 
 All notable changes to the "stm8-debug" extension will be documented in this file.
 
+## [v0.2.1]
+- Display statement time usage, may not be accurate
+***
+
 ## [v0.2.0]
 - support peripheral view
 - support custom peripheral SVD file

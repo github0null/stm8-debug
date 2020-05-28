@@ -2,7 +2,7 @@
     "name": "stm8-debug",
     "displayName": "STM8 Debugger",
     "description": "STM8 Debugger for vscode",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "publisher": "cl",
     "author": {
         "name": "cl",
@@ -47,7 +47,12 @@
                     "default": false
                 },
                 "stm8-debug.ParseStringToArray": {
-                    "markdownDescription": "make string variable as an char array",
+                    "markdownDescription": "Make string variable as an char array",
+                    "type": "boolean",
+                    "default": false
+                },
+                "stm8-debug.DisplayTimeUsage": {
+                    "markdownDescription": "Display statement time usage, may not be accurate",
                     "type": "boolean",
                     "default": false
                 }

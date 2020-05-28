@@ -14,8 +14,9 @@ export class GDB implements IGDB {
 
     private cmdQueue: CommandQueue;
     private nextID: number = 0;
-
     private hiddenMsgType?: LogType;
+
+    private prevTimeUsage: number | undefined;
 
     constructor(verbose?: boolean) {
         this._event = new EventEmitter();
@@ -351,10 +352,13 @@ export class GDB implements IGDB {
             const id = this.obtainID();
 
             const dathandler = (data: CommandResult) => {
-
                 if (data.id === id) {
+
                     const lines = data.lines;
                     this.cmdQueue.removeListener('lines', dathandler);
+
+                    // set command's time usage
+                    this.prevTimeUsage = data.timeUsage;
 
                     try {
                         const result = this.parser.parse(funcName, lines);
@@ -416,6 +420,10 @@ export class GDB implements IGDB {
             }
         });
     }
+
+    getCommandTimeUsage(): number | undefined {
+        return this.prevTimeUsage;
+    }
 }
 
 class Queue<T> {
@@ -449,6 +457,7 @@ class Queue<T> {
 interface CommandResult {
     id: number;
     lines: string[];
+    timeUsage?: number;
 }
 
 interface CommandData {
@@ -473,10 +482,12 @@ class CommandQueue {
     private writeBusy: boolean = false;
 
     private proc: Executable;
+    private timer: Timer;
 
     constructor() {
         this._event = new EventEmitter();
         this.proc = new ExeFile();
+        this.timer = new Timer();
     }
 
     launch(exe: string, args?: string[]): Promise<ErrorMsg | null> {
@@ -535,6 +546,7 @@ class CommandQueue {
         } else {
             this.writeBusy = true;
             this.proc.stdin.write(`${line}\r\n`, (err) => {
+                this.timer.start(`${id}`); // count time
                 this._event.emit('write-done', <WriteResult>{ id: id, err: err });
             });
         }
@@ -550,23 +562,50 @@ class CommandQueue {
 
         if (this.strBuf.getLastLine().startsWith('(gdb)')) {
 
+            // get time usage
+            const id = this.idQueue.count() > 0 ? <number>this.idQueue.dequeue() : CommandQueue.NULL_ID;
+            const timeUsage = this.timer.stop(`${id}`);
+
             // send data
             const lines = this.strBuf.toList();
             this.strBuf.clear();
             lines.splice(lines.length - 1);
-            const id = this.idQueue.count() > 0 ? <number>this.idQueue.dequeue() : CommandQueue.NULL_ID;
-            this._event.emit('lines', <CommandResult>{ id: id, lines: lines });
+            this._event.emit('lines', <CommandResult>{
+                id: id,
+                lines: lines,
+                timeUsage: timeUsage
+            });
 
             // next one
             if (this.cmdQueue.count() > 0) {
                 this.writeBusy = true;
                 const data = <CommandData>this.cmdQueue.dequeue();
                 this.proc.stdin.write(data.line, (err) => {
+                    this.timer.start(`${data.id}`); // count time
                     this._event.emit('write-done', <WriteResult>{ id: data.id, err: err });
                 });
             } else {
                 this.writeBusy = false;
             }
+        }
+    }
+}
+
+class Timer {
+
+    private timers: Map<string, number> = new Map();
+    private defLable = 'timer.default';
+
+    start(lable?: string) {
+        this.timers.set(lable || this.defLable, process.uptime());
+    }
+
+    stop(lable?: string): number | undefined {
+        const prevTime = this.timers.get(lable || this.defLable);
+        if (prevTime) {
+            const t = (process.uptime() - prevTime) * 1000;
+            this.timers.delete(lable || this.defLable);
+            return t;
         }
     }
 }
@@ -1100,3 +1139,4 @@ class GdbParser {
         return result;
     }
 }
+

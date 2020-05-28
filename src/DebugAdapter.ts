@@ -11,6 +11,7 @@ import { File } from '../lib/node-utility/File';
 import { EventEmitter } from 'events';
 import * as NodePath from 'path';
 import * as vscode from 'vscode';
+import { GlobalEvent } from './GlobalEvent';
 
 class Subject {
 
@@ -104,13 +105,15 @@ export class DebugAdapter extends DebugSession {
     private bpMap: Map<string, IGDB.Breakpoint[]> = new Map();
     private preLoadBPMap: Map<string, IGDB.Breakpoint[]> = new Map();
 
+    private timeUsed: number | undefined;
+
     constructor() {
         super();
 
         this.vHandles = new Handles(DebugAdapter.HANLER_START);
         this.cwd = <File>ResourceManager.getInstance().getWorkspaceDir();
         this.gdb = new GDB(ResourceManager.getInstance().isVerboseMode());
-        this.stringAsArray = ResourceManager.getInstance().parseString2Array();
+        this.stringAsArray = ResourceManager.getInstance().isParseString2Array();
 
         this.setDebuggerColumnsStartAt1(false);
         this.setDebuggerLinesStartAt1(false);
@@ -237,10 +240,10 @@ export class DebugAdapter extends DebugSession {
 
     private createSource(_path: string): Source {
         if (NodePath.isAbsolute(_path)) {
-            return new Source(NodePath.basename(_path), File.ToUri(_path));
+            return new Source(NodePath.basename(_path), _path);
         } else {
             const absPath = NodePath.join(this.cwd.path, _path);
-            return new Source(NodePath.basename(absPath), File.ToUri(absPath));
+            return new Source(NodePath.basename(absPath), absPath);
         }
     }
 
@@ -564,6 +567,7 @@ export class DebugAdapter extends DebugSession {
         await this.gdb.kill();
         this.warn('\tdone');
         this.warn('[END]');
+        GlobalEvent.emit('debug.terminal');
         this.sendResponse(response);
     }
 
@@ -745,6 +749,18 @@ export class DebugAdapter extends DebugSession {
                 this.funcArguments = stack[0].paramsList || [];
             }
 
+            // send Elapsed time event
+            if (this.timeUsed !== undefined && stack.length > 0) {
+                if (stack[0].line !== null && stack[0].file) {
+                    GlobalEvent.emit('debug.onStopped', {
+                        file: this.createSource(stack[0].file).path,
+                        line: stack[0].line - 1, // to zero base
+                        useTimeMs: this.timeUsed
+                    });
+                }
+                this.timeUsed = undefined;
+            }
+
             response.body = {
 
                 stackFrames: stack.map((frame) => {
@@ -760,6 +776,7 @@ export class DebugAdapter extends DebugSession {
                         column: 0,
                     };
                 }),
+
                 totalFrames: stack.length
             };
 
@@ -859,6 +876,7 @@ export class DebugAdapter extends DebugSession {
 
     protected continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments): void {
         this.gdb.continue().then(() => {
+            this.timeUsed = this.gdb.getCommandTimeUsage();
             this.sendEvent(new StoppedEvent('breakpoint', this.ThreadID));
         });
         this.sendResponse(response);
@@ -873,6 +891,7 @@ export class DebugAdapter extends DebugSession {
 
     protected stepOutRequest(response: DebugProtocol.StepOutResponse, args: DebugProtocol.StepOutArguments) {
         this.gdb.stepOut().then(() => {
+            this.timeUsed = this.gdb.getCommandTimeUsage();
             this.sendEvent(new StoppedEvent('step', this.ThreadID));
         });
         this.sendResponse(response);
@@ -880,6 +899,7 @@ export class DebugAdapter extends DebugSession {
 
     protected nextRequest(response: DebugProtocol.NextResponse, args: DebugProtocol.NextArguments) {
         this.gdb.next().then(() => {
+            this.timeUsed = this.gdb.getCommandTimeUsage();
             this.sendEvent(new StoppedEvent('step', this.ThreadID));
         });
         this.sendResponse(response);
@@ -941,4 +961,3 @@ export class DebugAdapter extends DebugSession {
         }
     }
 }
-

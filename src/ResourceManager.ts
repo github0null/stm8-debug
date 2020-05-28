@@ -48,8 +48,12 @@ export class ResourceManager {
         return this.getAppConfig().get<boolean>('UseVerboseMode') || false;
     }
 
-    parseString2Array(): boolean {
+    isParseString2Array(): boolean {
         return this.getAppConfig().get<boolean>('ParseStringToArray') || false;
+    }
+
+    isDisplayTimeUsage(): boolean {
+        return this.getAppConfig().get<boolean>('DisplayTimeUsage') || false;
     }
 
     //---

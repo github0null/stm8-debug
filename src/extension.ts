@@ -3,12 +3,13 @@ import * as net from 'net';
 import { DebugAdapter } from './DebugAdapter';
 import { ResourceManager } from './ResourceManager';
 import * as os from 'os';
+import { CodelensProvider } from './CodeLensProvider';
 
 export function activate(context: vscode.ExtensionContext) {
 
     console.log('---- stm8 debugger actived ----');
 
-    if(os.platform() !== 'win32') {
+    if (os.platform() !== 'win32') {
         vscode.window.showErrorMessage('STM8 Debugger only for win32 platform !');
         return;
     }
@@ -18,6 +19,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.debug.registerDebugAdapterDescriptorFactory('stm8-debug', new STM8DebugAdapterDescriptorFactory()),
         vscode.debug.registerDebugConfigurationProvider('stm8-debug', new STM8ConfigurationProvider()),
+        vscode.languages.registerCodeLensProvider({ language: 'c' }, new CodelensProvider())
     );
 
     process.setUncaughtExceptionCaptureCallback((err) => {
