@@ -313,7 +313,19 @@ export class GDB implements IGDB {
         });
     }
 
-    //---
+    readDisassembly(command: string): Promise<string[]> {
+        return new Promise((resolve, reject) => {
+            this.sendCommand(`disassemble ${command}`, this.readDisassembly.name, 'hide').then((result) => {
+                if (result.resultType === 'done' && result.data.disassembly) {
+                    resolve(result.data.disassembly);
+                } else {
+                    resolve();
+                }
+            }, reject);
+        });
+    }
+
+    //======================================================
 
     on(event: 'log', lisenter: (data: LogData) => void): void;
     on(event: any, lisenter: (arg: any) => void): void {
@@ -890,6 +902,21 @@ class GdbParser {
                         }
                     }
                     return;
+                }
+                break;
+            case this.gdb.readDisassembly.name:
+                /**
+                 * Dump of assembler code for function main:
+                 * 0x008a58 <main+0>:	0x89	PUSHW X	PUSHW X
+                 * 0x008b01 <main+169>:	0x2703	JREQ  0x8b06	JREQ  0x8b06
+                 * End of assembler dump.
+                */
+                if (!line.startsWith('Dump') && !line.startsWith('End')) {
+                    if (result.data.disassembly) {
+                        result.data.disassembly.push(line);
+                    } else {
+                        result.data.disassembly = [line];
+                    }
                 }
                 break;
             default:

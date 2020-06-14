@@ -5,7 +5,11 @@ import { ResourceManager } from './ResourceManager';
 import * as os from 'os';
 import { CodelensProvider } from './CodeLensProvider';
 
+let vsContext: vscode.ExtensionContext;
+
 export function activate(context: vscode.ExtensionContext) {
+
+    vsContext = context;
 
     console.log('---- stm8 debugger actived ----');
 
@@ -64,6 +68,8 @@ class STM8DebugAdapterDescriptorFactory implements vscode.DebugAdapterDescriptor
 
         this.server = net.createServer(socket => {
             const session = new DebugAdapter();
+            vsContext.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider(
+                ResourceManager.getInstance().getAppName(), session)); // disassembly provider
             session.setRunAsServer(true);
             session.start(<NodeJS.ReadableStream>socket, socket);
         }).listen(55555);

@@ -16,6 +16,7 @@ export class ResultData {
     public stack: Stack[] | null = null;
     public error: string | null = null;
     public memory: Memory | null = null;
+    public disassembly: string[] | null = null;
 }
 
 export interface GdbResult {
@@ -121,4 +122,6 @@ export interface IGDB {
     getRegisterVariables(): Promise<Variable[]>;
 
     readMemory(addr: number, len: number): Promise<Memory>;
+    
+    readDisassembly(command: string): Promise<string[]>;
 }

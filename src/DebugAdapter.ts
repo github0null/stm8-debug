@@ -12,6 +12,7 @@ import { EventEmitter } from 'events';
 import * as NodePath from 'path';
 import * as vscode from 'vscode';
 import { GlobalEvent } from './GlobalEvent';
+import * as util from 'util';
 
 class Subject {
 
@@ -76,7 +77,7 @@ class Variable extends vsDebugAdapter.Variable {
     vPath?: string;
 }
 
-export class DebugAdapter extends DebugSession {
+export class DebugAdapter extends DebugSession implements vscode.TextDocumentContentProvider {
 
     // must bigger than Scope ID
     private static readonly HANLER_START: number = 10;
@@ -99,6 +100,7 @@ export class DebugAdapter extends DebugSession {
     private peripherals: Peripheral[] = [];
     private periphRegValueMap: Map<string, number> = new Map();
 
+    // current frame information
     private frameChanged = false;
     private funcArguments: IGDB.Variable[] = [];
 
@@ -107,6 +109,13 @@ export class DebugAdapter extends DebugSession {
 
     private timeUsed: number | undefined;
 
+    // disassembly document
+    disassemblyScheme: string;
+    assemblyMatcher: RegExp = /^(0x[0-9a-f]+)\s+(<[^>]+>:)\s+(?:0x[0-9a-f]+)\s+(.*?)\s*$/i;
+    disassemblyBuf: Map<string, string[]>;
+    assemblyTextEvent: vscode.EventEmitter<vscode.Uri>;
+    onDidChange: vscode.Event<vscode.Uri>;
+
     constructor() {
         super();
 
@@ -114,6 +123,11 @@ export class DebugAdapter extends DebugSession {
         this.cwd = <File>ResourceManager.getInstance().getWorkspaceDir();
         this.gdb = new GDB(ResourceManager.getInstance().isVerboseMode());
         this.stringAsArray = ResourceManager.getInstance().isParseString2Array();
+
+        this.disassemblyScheme = ResourceManager.getInstance().getAppName();
+        this.assemblyTextEvent = new vscode.EventEmitter();
+        this.onDidChange = this.assemblyTextEvent.event;
+        this.disassemblyBuf = new Map();
 
         this.setDebuggerColumnsStartAt1(false);
         this.setDebuggerLinesStartAt1(false);
@@ -513,6 +527,65 @@ export class DebugAdapter extends DebugSession {
 
     //--
 
+    private async disassembleRange(start: string, length: string): Promise<string[] | undefined> {
+        const lines = await this.gdb.readDisassembly(`${start},+${length}`);
+        if (lines) {
+            return lines;
+        }
+    }
+
+    provideTextDocumentContent(uri: vscode.Uri, token: vscode.CancellationToken): vscode.ProviderResult<string> {
+
+        const lines = this.disassemblyBuf.get(uri.toString());
+        if (lines) {
+
+            const resList: { addr: string, txt: string, inst: string, com: string }[] = [];
+            let maxTextLen: number = 0;
+            let maxInstLen: number = 0;
+
+            lines.forEach((line) => {
+
+                const mList = this.assemblyMatcher.exec(line);
+                if (mList && mList.length > 3) {
+
+                    const wsIndex = mList[3].search(/\s/);
+                    if (wsIndex !== -1) {
+
+                        const inst = mList[3].substring(0, wsIndex);
+                        const nInstIndex = mList[3].indexOf(inst, wsIndex);
+                        if (nInstIndex !== -1) {
+
+                            const instruction = mList[3].substring(0, nInstIndex).trim();
+                            const comment = mList[3].substring(nInstIndex).trim();
+
+                            // add line
+                            maxInstLen = instruction.length > maxInstLen ? instruction.length : maxInstLen;
+                            maxTextLen = mList[2].length > maxTextLen ? mList[2].length : maxTextLen;
+                            resList.push({ addr: mList[1], txt: mList[2], inst: instruction, com: comment });
+                            return;
+                        }
+                    }
+
+                    // add line
+                    maxTextLen = mList[2].length > maxTextLen ? mList[2].length : maxTextLen;
+                    resList.push({ addr: mList[1], txt: mList[2], inst: mList[3], com: '' });
+                    return;
+                }
+
+                // add line
+                resList.push({ addr: line, txt: '', inst: '', com: '' });
+                return;
+            });
+
+            // convert line
+            return resList.map((info) => {
+                return `${info.addr}\t${info.txt.padEnd(maxTextLen)}\t${info.inst.padEnd(maxInstLen)}\t; ${info.com}`;
+            }).join('\r\n');
+        }
+    }
+
+    //=================================================
+
     /**
 	 * The 'initialize' request is the first request called by the frontend
 	 * to interrogate the features the debug adapter provides.
@@ -582,7 +655,7 @@ export class DebugAdapter extends DebugSession {
         // notify the launchRequest that configuration has finished
         setTimeout(() => {
             this.configDoneEmitter.notify();
-        }, 500);
+        }, 100);
     }
 
     protected async launchRequest(response: DebugProtocol.LaunchResponse, args: LaunchArguments) {
@@ -617,7 +690,7 @@ export class DebugAdapter extends DebugSession {
             this.error(`Load SVD failed !, msg: ${(<Error>e).message}`);
         }
 
-        this.log(`\r\n================ Launch ================\r\n`);
+        this.log(`\r\n================== Launch ==================\r\n`);
 
         // start the program in the runtime
         this.isConnected = await this.gdb.connect(args, extraCommand);
@@ -729,7 +802,7 @@ export class DebugAdapter extends DebugSession {
         this.sendResponse(response);
     }
 
-    protected stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments): void {
+    protected async stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments) {
 
         const startFrame = typeof args.startFrame === 'number' ? args.startFrame : 0;
         const maxLevels = typeof args.levels === 'number' ? args.levels : 100;
@@ -742,46 +815,83 @@ export class DebugAdapter extends DebugSession {
         // clear all variables
         this.vClearAll();
 
-        this.gdb.getStack(startFrame, endFrame).then((stack) => {
+        const stack = await this.gdb.getStack(startFrame, endFrame);
 
-            // init current frame's params
-            if (stack.length > 0) {
-                this.funcArguments = stack[0].paramsList || [];
+        // init current frame function arguments
+        if (stack.length > 0) {
+            this.funcArguments = stack[0].paramsList || [];
+        }
+
+        // send Elapsed time event
+        if (this.timeUsed !== undefined && stack.length > 0) {
+            if (stack[0].line !== null && stack[0].file) {
+                GlobalEvent.emit('debug.onStopped', {
+                    file: this.createSource(stack[0].file).path,
+                    line: stack[0].line - 1, // to zero base
+                    useTimeMs: this.timeUsed
+                });
             }
+            this.timeUsed = undefined;
+        }
 
-            // send Elapsed time event
-            if (this.timeUsed !== undefined && stack.length > 0) {
-                if (stack[0].line !== null && stack[0].file) {
-                    GlobalEvent.emit('debug.onStopped', {
-                        file: this.createSource(stack[0].file).path,
-                        line: stack[0].line - 1, // to zero base
-                        useTimeMs: this.timeUsed
-                    });
+        const stackFrames: DebugProtocol.StackFrame[] = [];
+
+        for (let index = 0; index < stack.length; index++) {
+            const frame = stack[index];
+
+            if (util.isNullOrUndefined(frame.file) && frame.address) {
+
+                const prevInstructionOffset = 10;
+                const instructionLen = 30;
+
+                let line: number | undefined;
+                let fileName: string | undefined;
+                let asmFileUri: string | undefined;
+                let cAddress: number = parseInt(frame.address);
+
+                const addrStart: string = `0x${(cAddress - prevInstructionOffset).toString(16)}`;
+                const asmLines = await this.disassembleRange(addrStart, instructionLen.toString());
+
+                if (asmLines) {
+                    const fileName = `${frame.address}.stm8asm`;
+                    asmFileUri = `${this.disassemblyScheme}:${encodeURIComponent(fileName)}`;
+                    const bkptReg = new RegExp(`${frame.address}`);
+                    line = asmLines.findIndex((line) => { return bkptReg.test(line); }) + 1;
+                    this.disassemblyBuf.set(asmFileUri, asmLines);
+                    this.assemblyTextEvent.fire(vscode.Uri.parse(asmFileUri));
                 }
-                this.timeUsed = undefined;
+
+                stackFrames.push(<DebugProtocol.StackFrame>{
+                    id: frame.level,
+                    name: `${frame.address} ${frame.function}`,
+                    line: line || 0,
+                    source: asmFileUri ? new Source(<string>fileName, asmFileUri) : undefined,
+                    column: 0,
+                });
+
+            } else {
+
+                const frameName: string = frame.address ?
+                    (`${frame.address} ${frame.function}`) : frame.function;
+
+                stackFrames.push(<DebugProtocol.StackFrame>{
+                    id: frame.level,
+                    name: frameName,
+                    line: frame.line || 0,
+                    source: frame.file ? this.createSource(frame.file) : undefined,
+                    column: 0,
+                });
             }
+        }
 
-            response.body = {
+        response.body = {
 
-                stackFrames: stack.map((frame) => {
+            stackFrames: stackFrames,
 
-                    const funcName: string = frame.address ?
-                        (`${frame.address} ${frame.function}`) : frame.function;
+            totalFrames: stack.length
+        };
 
-                    return <DebugProtocol.StackFrame>{
-                        id: frame.level,
-                        name: funcName,
-                        line: frame.line || 0,
-                        source: frame.file ? this.createSource(frame.file) : undefined,
-                        column: 0,
-                    };
-                }),
-
-                totalFrames: stack.length
-            };
-
-            this.sendResponse(response);
-        });
+        this.sendResponse(response);
     }
 
     protected async scopesRequest(response: DebugProtocol.ScopesResponse, args: DebugProtocol.ScopesArguments) {
@@ -912,6 +1022,11 @@ export class DebugAdapter extends DebugSession {
                 this.sendEvent(new StoppedEvent('pause', this.ThreadID));
             }
         });
+    }
+
+    protected disassembleRequest(response: DebugProtocol.DisassembleResponse,
+        args: DebugProtocol.DisassembleArguments, request?: DebugProtocol.Request): void {
+        // no support now
     }
 
     private searchVariable(expression: string, frameID?: number): DebugProtocol.Variable | undefined {

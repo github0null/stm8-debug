@@ -1,0 +1,96 @@
+{
+    "information_for_contributors": [
+        "STM8 disassembly support, author: cl"
+    ],
+    "version": "1.0.0",
+    "name": "stm8asm",
+    "scopeName": "source.asm.stm8asm",
+    "patterns": [
+        {
+            "include": "#instruction"
+        },
+        {
+            "include": "#operators"
+        },
+        {
+            "include": "#register"
+        },
+        {
+            "include": "#hexNumber"
+        },
+        {
+            "include": "#comment"
+        },
+        {
+            "include": "#jumpFuncName"
+        },
+        {
+            "include": "#addressText"
+        }
+    ],
+    "repository": {
+        "addressText": {
+            "match": "(?i)(<[^>]+>:)",
+            "captures": {
+                "1": {
+                    "name": "entity.name.type"
+                }
+            }
+        },
+        "instruction": {
+            "match": "(?i)\\b(ADC|ADD|ADDW|AND|BCCM|BCP|BCPL|BREAK|BRES|BSET|BTJF|BTJT|CALL|CALLF|CALLR|CCF|CLR|CLRW|CP|CPW|CPL|CPLW|DEC|DECW|DIV|DIVW|EXG|EXGW|HALT|INC|INCW|INT|IRET|JP|JPF|JRA|JR[a-z]{1,2}|LD|LDF|LDW|MOV|MUL|NEG|NEGW|NOP|OR|POP|POPW|PUSH|PUSHW|RCF|RET|RETF|RIM|RLC|RLCW|RLWA|RRC|RRCW|RRWA|RVF|SBC|SCF|SIM|SLL|SLA|SLLW|SLAW|SRA|SRAW|SRL|SRLW|SUB|SUBW|SWAP|SWAPW|TNZ|TNZW|TRAP|WFE|WFI|XOR)\\b",
+            "captures": {
+                "1": {
+                    "name": "support.function.mnemonic.arithmetic.stm8asm"
+                }
+            }
+        },
+        "operators": {
+            "match": "#",
+            "captures": {
+                "0": {
+                    "name": "keyword.operator"
+                }
+            }
+        },
+        "register": {
+            "match": "\\b(PC|SP|A|X|Y|CC|XH|XL|YH|YL|BX|CX|BH|BL|CH|CL)\\b",
+            "captures": {
+                "1": {
+                    "name": "storage.other.register.stm8asm"
+                }
+            }
+        },
+        "hexNumber": {
+            "match": "(?i)\\b(0x[0-9a-f]+)\\b",
+            "captures": {
+                "1": {
+                    "name": "constant.numeric"
+                }
+            }
+        },
+        "comment": {
+            "match": "(?i)(;[^;]*)",
+            "captures": {
+                "1": {
+                    "name": "comment.line"
+                }
+            }
+        },
+        "jumpFuncName": {
+            "match": "\\b(CALL|CALLF|CALLR|JP|JPF)\\b\\s+([a-zA-Z_]\\w*)",
+            "captures": {
+                "1": {
+                    "patterns": [
+                        {
+                            "include": "#instruction"
+                        }
+                    ]
+                },
+                "2": {
+                    "name": "variable"
+                }
+            }
+        }
+    }
+}

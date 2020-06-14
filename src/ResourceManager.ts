@@ -9,6 +9,8 @@ const dirList: string[] = [
 ];
 
 export class ResourceManager {
+    
+    private readonly appName: string = 'stm8-debug';
 
     private extensionDir: File;
     private dirMap: Map<string, File>;
@@ -30,6 +32,10 @@ export class ResourceManager {
             }
         }
         return _instance;
+    }
+
+    getAppName(): string {
+        return this.appName;
     }
 
     getBinDir(): File {

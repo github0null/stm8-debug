@@ -395,6 +395,27 @@
                 "fileMatch": "**/*.svd.json",
                 "url": "./lang/svd.verify.json"
             }
+        ],
+        "languages": [
+            {
+                "id": "stm8asm",
+                "aliases": [
+                    "STM8 Disassembly"
+                ],
+                "extensions": [
+                    ".stm8asm"
+                ],
+                "filenamePatterns": [
+                    "**/*.stm8asm"
+                ]
+            }
+        ],
+        "grammars": [
+            {
+                "language": "stm8asm",
+                "scopeName": "source.asm.stm8asm",
+                "path": "./lang/stm8asm.tmLanguage.json"
+            }
         ]
     },
     "scripts": {
