@@ -6,7 +6,7 @@ import * as path from 'path';
 export class GDB implements IGDB {
 
     private readonly COMMAND_INTRRUPT: string = 'interrupt';
-    private readonly SIGNAL_INTRRUPT: NodeJS.Signals = 'SIGTRAP';
+    private readonly SIGNAL_INTRRUPT: NodeJS.Signals = 'SIGSTOP';
 
     private _event: EventEmitter;
     private parser: GdbParser;

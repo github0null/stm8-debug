@@ -146,3 +146,5 @@ There is a demo for `stm8s003f3` cpu, file name: `stm8s003f3.svd.json`
 
 - ### The file path must contain only ASCII characters
 
+- ### If debugging cannot be started, you may need to download hex/bin file to chip and try again
+

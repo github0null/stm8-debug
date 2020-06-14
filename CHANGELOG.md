@@ -2,6 +2,10 @@
 
 All notable changes to the "stm8-debug" extension will be documented in this file.
 
+## [v0.3.0]
+- New: Add disassembly
+***
+
 ## [v0.2.1]
 - Display statement time usage, may not be accurate
 ***
