@@ -77,6 +77,12 @@ class Variable extends vsDebugAdapter.Variable {
     vPath?: string;
 }
 
+interface MemoryInfo {
+    addr: string;
+    end: string;
+    size: string;
+}
+
 export class DebugAdapter extends DebugSession implements vscode.TextDocumentContentProvider {
 
     // must bigger than Scope ID
@@ -111,7 +117,10 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
 
     // disassembly document
     disassemblyScheme: string;
-    assemblyMatcher: RegExp = /^(0x[0-9a-f]+)\s+(<[^>]+>:)\s+(?:0x[0-9a-f]+)\s+(.*?)\s*$/i;
+    assemblyMatcher = {
+        'normal': /^(0x[0-9a-f]+)\s+(<[^>]+>:)\s+(?:0x[0-9a-f]+)\s+(.*?)\s*$/i,
+        'simple': /^(0x[0-9a-f]+):\s+(?:0x[0-9a-f]+)\s+(.*?)\s*$/i
+    };
     disassemblyBuf: Map<string, string[]>;
     assemblyTextEvent: vscode.EventEmitter<vscode.Uri>;
     onDidChange: vscode.Event<vscode.Uri>;
@@ -159,7 +168,7 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
         this.sendEvent(new OutputEvent(`${line}\r\n`, 'stderr'));
     }
 
-    //---
+    //----- variables
 
     private cacheChild(children: IGDB.VariableChildren): number {
 
@@ -250,7 +259,7 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
         return undefined;
     }
 
-    //---
+    //------ source
 
     private createSource(_path: string): Source {
         if (NodePath.isAbsolute(_path)) {
@@ -288,7 +297,7 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
         this.preLoadBPMap.clear();
     }
 
-    //--
+    //------ svd
 
     private loadSvd(fPath: string) {
 
@@ -525,12 +534,26 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
         return resultList;
     }
 
-    //--
+    //----- disassembly
 
     private async disassembleRange(start: string, length: string): Promise<string[] | undefined> {
         const lines = await this.gdb.readDisassembly(`${start},+${length}`);
         if (lines) {
             return lines;
+        }
+    }
+
+    private splitInstructionLine(line: string): { instruction: string, comment: string } | undefined {
+        const wsIndex = line.search(/\s/);
+        if (wsIndex !== -1) {
+            const instName = line.substring(0, wsIndex);
+            const nInstIndex = line.indexOf(instName, wsIndex);
+            if (nInstIndex !== -1) {
+                return {
+                    instruction: line.substring(0, nInstIndex).trim(),
+                    comment: line.substring(nInstIndex).trim()
+                };
+            }
         }
     }
 
@@ -545,30 +568,42 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
 
             lines.forEach((line) => {
 
-                const mList = this.assemblyMatcher.exec(line);
+                /**
+                 * 0x0080aef <Main+4>: 0x20DF PUSH A PUSH A
+                */
+                let mList = this.assemblyMatcher['normal'].exec(line);
                 if (mList && mList.length > 3) {
 
-                    const wsIndex = mList[3].search(/\s/);
-                    if (wsIndex !== -1) {
-
-                        const inst = mList[3].substring(0, wsIndex);
-                        const nInstIndex = mList[3].indexOf(inst, wsIndex);
-                        if (nInstIndex !== -1) {
-
-                            const instruction = mList[3].substring(0, nInstIndex).trim();
-                            const comment = mList[3].substring(nInstIndex).trim();
-
-                            // add line
-                            maxInstLen = instruction.length > maxInstLen ? instruction.length : maxInstLen;
-                            maxTextLen = mList[2].length > maxTextLen ? mList[2].length : maxTextLen;
-                            resList.push({ addr: mList[1], txt: mList[2], inst: instruction, com: comment });
-                            return;
-                        }
+                    const pair = this.splitInstructionLine(mList[3]);
+                    if (pair) {
+                        // add line
+                        maxInstLen = pair.instruction.length > maxInstLen ? pair.instruction.length : maxInstLen;
+                        maxTextLen = mList[2].length > maxTextLen ? mList[2].length : maxTextLen;
+                        resList.push({ addr: mList[1], txt: mList[2], inst: pair.instruction, com: pair.comment });
+                        return;
                     }
 
                     // add line
                     maxTextLen = mList[2].length > maxTextLen ? mList[2].length : maxTextLen;
                     resList.push({ addr: mList[1], txt: mList[2], inst: mList[3], com: '' });
+                    return;
+                }
+
+                /**
+                 * 0x0080aef: 0x20DF PUSH A PUSH A
+                */
+                mList = this.assemblyMatcher['simple'].exec(line);
+                if (mList && mList.length > 2) {
+
+                    const pair = this.splitInstructionLine(mList[2]);
+                    if (pair) {
+                        maxInstLen = pair.instruction.length > maxInstLen ? pair.instruction.length : maxInstLen;
+                        resList.push({ addr: mList[1], txt: '', inst: pair.instruction, com: pair.comment });
+                        return;
+                    }
+
+                    // add line
+                    resList.push({ addr: mList[1], txt: '', inst: mList[2], com: '' });
                     return;
                 }
 
@@ -583,6 +618,38 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
             }).join('\r\n');
         }
     }
+
+    //----- fill memory
+
+    private parseMemoryLayout(lines: string[]): { ram?: MemoryInfo, flash?: MemoryInfo } {
+        const result: { ram?: MemoryInfo, flash?: MemoryInfo } = Object.create(null);
+        const matcher = /^\[(0x[0-9a-f]+)-(0x[0-9a-f]+)\]:(\w+)$/i;
+        for (const line of lines) {
+            const mList = matcher.exec(line);
+            if (mList && mList.length > 3) {
+                switch (mList[3].toLocaleLowerCase()) {
+                    case 'ram':
+                        result.ram = {
+                            addr: mList[1],
+                            end: mList[2],
+                            size: '0x' + (parseInt(mList[2]) - parseInt(mList[1]) + 1).toString(16)
+                        };
+                        break;
+                    case 'flash':
+                        result.flash = {
+                            addr: mList[1],
+                            end: mList[2],
+                            size: '0x' + (parseInt(mList[2]) - parseInt(mList[1]) + 1).toString(16)
+                        };
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+        return result;
+    }
+
 
     //=================================================
 
@@ -600,14 +667,14 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
         response.body.supportsRestartRequest = true;
         response.body.supportsTerminateRequest = true;
 
-        this.log(`================ Initialize ================\r\n`);
+        this.log(`==================== Initialize ====================\r\n`);
 
         const resManager = ResourceManager.getInstance();
         const gdbPath = resManager
             .getBinDir().path + File.sep + 'gdb.exe';
 
         // clear log
-        const logFile = File.fromArray([resManager.getBinDir().dir, 'swim', 'Error.log']);
+        const logFile = File.fromArray([resManager.getBinDir().path, 'swim', 'Error.log']);
         if (logFile.IsFile()) {
             logFile.Write('');
         }
@@ -636,10 +703,10 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
 
     // kill gdb.exe
     protected async disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments) {
-        this.warn('[SEND]: kill gdb.exe');
+        this.log('[SEND]: kill gdb.exe');
         await this.gdb.kill();
-        this.warn('\tdone');
-        this.warn('[END]');
+        this.log('\tdone');
+        this.log('[END]');
         GlobalEvent.emit('debug.terminal');
         this.sendResponse(response);
     }
@@ -663,14 +730,6 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
         // wait until configuration has finished (and configurationDoneRequest has been called)
         await this.configDoneEmitter.wait();
 
-        let extraCommand: string[] | undefined;
-
-        if (args.runToMain !== false) {
-            extraCommand = [
-                `break main`
-            ];
-        }
-
         // load svd
         try {
             if (args.svdFile) {
@@ -690,24 +749,33 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
             this.error(`Load SVD failed !, msg: ${(<Error>e).message}`);
         }
 
-        this.log(`\r\n================== Launch ==================\r\n`);
-
-        // start the program in the runtime
-        this.isConnected = await this.gdb.connect(args, extraCommand);
-
+        // connect to gdb
+        this.log(`\r\n==================== Connect ====================\r\n`);
+        this.isConnected = await this.gdb.connect(args);
         if (this.isConnected) {
-            this.sendResponse(response);
-            await this.loadBreakPoints();
-            this.gdb.continue().then(() => {
-                if (args.runToMain !== false) {
-                    this.sendEvent(new StoppedEvent('entry', this.ThreadID));
-                } else {
-                    this.sendEvent(new StoppedEvent('breakpoint', this.ThreadID));
+
+            // other custom commands
+            const extraCommands: string[] = [];
+
+            if (args.runToMain !== false) {
+                extraCommands.push('break main');
+            }
+
+            this.log(`\r\n==================== Launch ====================\r\n`);
+            const launched = await this.gdb.launch(args.executable, extraCommands);
+            if (launched) {
+                this.sendResponse(response);
+                await this.loadBreakPoints();
+                const bkpt = await this.gdb.continue();
+                if (bkpt) {
+                    this.sendEvent(new StoppedEvent(args.runToMain !== false ? 'entry' : 'breakpoint', this.ThreadID));
                 }
-            });
-        } else {
-            this.sendEvent(new TerminatedEvent());
+                return;
+            }
         }
+
+        // launch failed, exit
+        this.sendEvent(new TerminatedEvent());
     }
 
     protected async restartRequest(response: DebugProtocol.RestartResponse, args: DebugProtocol.RestartArguments) {
@@ -721,8 +789,6 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
                     this.sendResponse(response);
                 }
             });
-        } else {
-            this.sendResponse(response);
         }
     }
 
@@ -849,7 +915,8 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
                 let asmFileUri: string | undefined;
                 let cAddress: number = parseInt(frame.address);
 
-                const addrStart: string = `0x${(cAddress - prevInstructionOffset).toString(16)}`;
+                const realStartAddr = cAddress >= prevInstructionOffset ? (cAddress - prevInstructionOffset) : 0;
+                const addrStart: string = `0x${realStartAddr.toString(16)}`;
                 const asmLines = await this.disassembleRange(addrStart, instructionLen.toString());
 
                 if (asmLines) {

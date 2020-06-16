@@ -2,6 +2,11 @@
 
 All notable changes to the "stm8-debug" extension will be documented in this file.
 
+## [v0.3.1]
+- Fixed: Can't launch debug, message: "SWIM PROG error [42010]: File open error"
+- Fixed: Can't clear Error.log
+***
+
 ## [v0.3.0]
 - New: Add disassembly
 ***

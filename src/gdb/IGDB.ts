@@ -14,13 +14,14 @@ export class ResultData {
     public varDef: VariableDefine[] | null = null;
     public var: Variable[] | null = null;
     public stack: Stack[] | null = null;
-    public error: string | null = null;
     public memory: Memory | null = null;
     public disassembly: string[] | null = null;
+    public customLines: string[] | null = null;
 }
 
 export interface GdbResult {
     resultType: GdbResultType;
+    error: string | null;
     data: ResultData;
     logs: string[];
 }
@@ -68,6 +69,13 @@ export interface Memory {
     buf: number[];
 }
 
+export interface CustomCommandResult {
+    resultType: GdbResultType;
+    lines: string[];
+    error: string | null;
+    logs: string[];
+}
+
 export type ErrorMsg = string;
 
 export type LogType = 'warning' | 'log' | 'error' | 'hide';
@@ -93,7 +101,9 @@ export interface IGDB {
 
     isStopped(): boolean;
 
-    connect(option: ConnectOption, otherCommand?: string[]): Promise<boolean>;
+    connect(option: ConnectOption): Promise<boolean>;
+
+    launch(executable: string, otherCommand?: string[]): Promise<boolean>;
 
     disconnect(): Promise<void>;
 
@@ -122,6 +132,8 @@ export interface IGDB {
     getRegisterVariables(): Promise<Variable[]>;
 
     readMemory(addr: number, len: number): Promise<Memory>;
-    
+
     readDisassembly(command: string): Promise<string[]>;
+
+    sendCustomCommand(command: string, showLog?: boolean): Promise<CustomCommandResult>;
 }

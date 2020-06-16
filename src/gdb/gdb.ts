@@ -1,4 +1,4 @@
-import { IGDB, GdbResult, Breakpoint, Stack, Variable, ErrorMsg, VariableDefine, ResultData, ConnectOption, LogType, LogData, Memory } from "./IGDB";
+import { IGDB, GdbResult, Breakpoint, Stack, Variable, ErrorMsg, VariableDefine, ResultData, ConnectOption, LogType, LogData, Memory, CustomCommandResult } from "./IGDB";
 import { EventEmitter } from 'events';
 import { Executable, ExeFile } from '../../lib/node-utility/Executable';
 import * as path from 'path';
@@ -37,27 +37,20 @@ export class GDB implements IGDB {
         return this.nextID++;
     }
 
-    async connect(option: ConnectOption, otherCommand?: string[]): Promise<boolean> {
+    async connect(option: ConnectOption): Promise<boolean> {
 
         const portString = option.port ? `-port ${option.port}` : '';
 
         const commandList: string[] = [
             `file "${option.executable}"`,
             `target gdi -dll swim\\stm_swim.dll -${option.interface} ${portString}`,
-            `mcuname -set ${option.cpu}`,
-            `load "${option.executable}"`
+            `mcuname -set ${option.cpu}`
         ];
 
         for (const cmd of commandList) {
             const res = await this.sendCommand(cmd, this.connect.name);
             if (res.resultType === 'failed') {
                 return false;
-            }
-        }
-
-        if (otherCommand) {
-            for (const cmd of otherCommand) {
-                await this.sendCommand(cmd, this.connect.name, 'hide');
             }
         }
 
@@ -71,9 +64,40 @@ export class GDB implements IGDB {
         return true;
     }
 
+    async launch(executable: string, otherCommand?: string[]): Promise<boolean> {
+
+        const commandList: string[] = [
+            `load "${executable}"`,
+            `reset`
+        ];
+
+        for (const cmd of commandList) {
+            const res = await this.sendCommand(cmd, this.launch.name);
+            if (res.resultType === 'failed') {
+                return false;
+            }
+        }
+
+        if (otherCommand) {
+            for (const cmd of otherCommand) {
+                await this.sendCommand(cmd, this.launch.name, 'hide');
+            }
+        }
+
+        return true;
+    }
+
     async disconnect(): Promise<void> {
-        // target gdi -close
-        await this.sendCommand(`target gdi -close`, this.disconnect.name, 'warning');
+
+        const commands: string[] = [
+            'delete',
+            'symbol-file',
+            'target gdi -close'
+        ];
+
+        for (const cmd of commands) {
+            await this.sendCommand(cmd, this.disconnect.name, 'log');
+        }
     }
 
     isStopped(): boolean {
@@ -325,6 +349,19 @@ export class GDB implements IGDB {
         });
     }
 
+    sendCustomCommand(command: string, showLog?: boolean): Promise<CustomCommandResult> {
+        return new Promise((resolve, reject) => {
+            this.sendCommand(command, this.sendCustomCommand.name, showLog ? this.hiddenMsgType : 'hide').then((result) => {
+                resolve({
+                    resultType: result.resultType,
+                    lines: result.data.customLines || [],
+                    error: result.error,
+                    logs: result.logs
+                });
+            }, reject);
+        });
+    }
+
     //======================================================
 
     on(event: 'log', lisenter: (data: LogData) => void): void;
@@ -392,10 +429,10 @@ export class GDB implements IGDB {
 
                         const rData = new ResultData();
                         this.log('error', `[Parser Error]: ${(<Error>error).message}`);
-                        rData.error = `parse error: ${(<Error>error).message}`;
 
                         resolve({
                             resultType: 'failed',
+                            error: `parse error: ${(<Error>error).message}`,
                             data: rData,
                             logs: []
                         });
@@ -413,6 +450,7 @@ export class GDB implements IGDB {
                         resolve({
                             resultType: 'failed',
                             data: Object.create(null),
+                            error: data.err.message,
                             logs: []
                         });
                     }
@@ -426,6 +464,7 @@ export class GDB implements IGDB {
                     resolve({
                         resultType: 'failed',
                         data: Object.create(null),
+                        error: err.message,
                         logs: []
                     });
                 }
@@ -572,6 +611,9 @@ class CommandQueue {
 
         this.strBuf.append(chunk);
 
+        // log to console
+        console.log(chunk);
+
         if (this.strBuf.getLastLine().startsWith('(gdb)')) {
 
             // get time usage
@@ -704,14 +746,14 @@ class GdbParser {
         // failed
         if (line.startsWith('Error')) {
             result.resultType = 'failed';
-            result.data.error = line.replace('Error:', '').trim();
+            result.error = line.replace('Error:', '').trim();
             return;
         }
 
         // Not available for current target.
         if (line.startsWith('Not available for current target')) {
             result.resultType = 'failed';
-            result.data.error = line;
+            result.error = line;
             return;
         }
 
@@ -917,6 +959,13 @@ class GdbParser {
                     } else {
                         result.data.disassembly = [line];
                     }
+                }
+                break;
+            case this.gdb.sendCustomCommand.name:
+                if (result.data.customLines) {
+                    result.data.customLines.push(line);
+                } else {
+                    result.data.customLines = [line];
                 }
                 break;
             default:
@@ -1156,6 +1205,7 @@ class GdbParser {
         const result: GdbResult = {
             resultType: 'done',
             data: new ResultData(),
+            error: null,
             logs: []
         };
 
