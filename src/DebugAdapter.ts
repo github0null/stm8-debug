@@ -78,12 +78,6 @@ class Variable extends vsDebugAdapter.Variable {
     vPath?: string;
 }
 
-interface MemoryInfo {
-    addr: string;
-    end: string;
-    size: string;
-}
-
 export class DebugAdapter extends DebugSession implements vscode.TextDocumentContentProvider {
 
     // must bigger than Scope ID
@@ -618,37 +612,6 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
                 return `${info.addr}\t${info.txt.padEnd(maxTextLen)}\t${info.inst.padEnd(maxInstLen)}\t; ${info.com}`;
             }).join('\r\n');
         }
-    }
-
-    //----- fill memory
-
-    private parseMemoryLayout(lines: string[]): { ram?: MemoryInfo, flash?: MemoryInfo } {
-        const result: { ram?: MemoryInfo, flash?: MemoryInfo } = Object.create(null);
-        const matcher = /^\[(0x[0-9a-f]+)-(0x[0-9a-f]+)\]:(\w+)$/i;
-        for (const line of lines) {
-            const mList = matcher.exec(line);
-            if (mList && mList.length > 3) {
-                switch (mList[3].toLocaleLowerCase()) {
-                    case 'ram':
-                        result.ram = {
-                            addr: mList[1],
-                            end: mList[2],
-                            size: '0x' + (parseInt(mList[2]) - parseInt(mList[1]) + 1).toString(16)
-                        };
-                        break;
-                    case 'flash':
-                        result.flash = {
-                            addr: mList[1],
-                            end: mList[2],
-                            size: '0x' + (parseInt(mList[2]) - parseInt(mList[1]) + 1).toString(16)
-                        };
-                        break;
-                    default:
-                        break;
-                }
-            }
-        }
-        return result;
     }
 
     //------ option bytes
