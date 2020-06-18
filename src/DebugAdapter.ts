@@ -69,6 +69,7 @@ enum ScopeType {
     SCOPE_LOCAL,
     SCOPE_FUNC_PARAMS,
     SCOPE_REGISTER,
+    SCOPE_OPTION_BYTES,
     SCOPE_PERIPHERAL
 }
 
@@ -650,6 +651,30 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
         return result;
     }
 
+    //------ option bytes
+
+    //command gdi mcuoption -show
+
+    private async readOptionBytes(): Promise<IGDB.Variable[] | undefined> {
+
+        const result = await this.gdb.sendCustomCommand('gdi mcuoption -show');
+        if (result.resultType === 'done') {
+            const vList: IGDB.Variable[] = [];
+
+            result.lines.forEach((line) => {
+                const index = line.indexOf(':');
+                if (index !== -1) {
+                    vList.push({
+                        name: line.substr(0, index),
+                        type: 'orignal',
+                        value: line.substr(index + 1)
+                    });
+                }
+            });
+
+            return vList;
+        }
+    }
 
     //=================================================
 
@@ -665,7 +690,7 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
         response.body.supportsEvaluateForHovers = true;
         response.body.supportsConditionalBreakpoints = true;
         response.body.supportsRestartRequest = true;
-        response.body.supportsTerminateRequest = true;
+        //response.body.supportsTerminateRequest = true;
 
         this.log(`==================== Initialize ====================\r\n`);
 
@@ -975,6 +1000,7 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
                 new Scope("Locals", ScopeType.SCOPE_LOCAL, false),
                 new Scope("Arguments", ScopeType.SCOPE_FUNC_PARAMS, false),
                 new Scope("Registers", ScopeType.SCOPE_REGISTER, true),
+                new Scope('Option Bytes', ScopeType.SCOPE_OPTION_BYTES, true),
                 new Scope('Peripherals', ScopeType.SCOPE_PERIPHERAL, true)
             ]
         };
@@ -1020,6 +1046,14 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
                     if (vList) {
                         response.body.variables = vList.map((_v) => {
                             return this.vToVariable(_v);
+                        });
+                    }
+                    break;
+                case ScopeType.SCOPE_OPTION_BYTES:
+                    const opList = await this.readOptionBytes();
+                    if (opList) {
+                        response.body.variables = opList.map((optionByte) => {
+                            return this.vToVariable(optionByte);
                         });
                     }
                     break;
