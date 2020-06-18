@@ -2,6 +2,10 @@
 
 All notable changes to the "stm8-debug" extension will be documented in this file.
 
+## [v0.4.0]
+- New: add mcu option bytes view
+***
+
 ## [v0.3.1]
 - Fixed: Can't launch debug, message: "SWIM PROG error [42010]: File open error"
 - Fixed: Can't clear Error.log
@@ -16,8 +20,8 @@ All notable changes to the "stm8-debug" extension will be documented in this fil
 ***
 
 ## [v0.2.0]
-- support peripheral view
-- support custom peripheral SVD file
+- New: support peripheral view
+- New: support custom peripheral SVD file
 ***
 
 ## [v0.1.2]

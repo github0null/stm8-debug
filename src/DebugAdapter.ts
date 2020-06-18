@@ -271,18 +271,18 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
 
     private async loadBreakPoints() {
 
-        for (const fPath of this.preLoadBPMap.keys()) {
+        for (const keyValue of this.preLoadBPMap) {
 
-            const bpList = <IGDB.Breakpoint[]>this.preLoadBPMap.get(fPath);
+            const fPath = keyValue[0];
+            const bpList = keyValue[1];
             const validList: IGDB.Breakpoint[] = [];
 
             for (const bp of bpList) {
                 const bkpt = await this.gdb.addBreakPoint(bp);
                 if (bkpt) {
                     validList.push(bkpt);
-                    this.sendEvent(new BreakpointEvent('changed', new Breakpoint(
-                        true, bkpt.line, 0, (bkpt.file ? this.createSource(bkpt.file) : undefined)
-                    )));
+                    /* this.sendEvent(new BreakpointEvent('changed',
+                        new Breakpoint(true, bp.line, 0, this.createSource(fPath)))); */
                 }
             }
 
@@ -682,19 +682,13 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
         }
     }
 
-    // terminal gdb connect
-    protected async terminateRequest(response: DebugProtocol.TerminateResponse, args: DebugProtocol.TerminateArguments, request?: DebugProtocol.Request) {
-        await this.gdb.disconnect();
-        this.isConnected = false;
-        this.sendResponse(response);
-    }
-
     // kill gdb.exe
     protected async disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments) {
         this.log('[SEND]: kill gdb.exe');
         await this.gdb.kill();
         this.log('\tdone');
         this.log('[END]');
+        this.isConnected = false;
         GlobalEvent.emit('debug.terminal');
         this.sendResponse(response);
     }
@@ -818,13 +812,15 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
                 });
 
                 if (bkpt) {
-                    validList.push(bkpt);
+
                     response.body.breakpoints.push({
                         line: bkpt.line,
                         id: bkpt.number,
                         source: this.createSource(file),
                         verified: true
                     });
+
+                    validList.push(bkpt);
                 }
             }
 
@@ -833,6 +829,13 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
 
         } else {
             this.preLoadBPMap.set(file, bpList.map((bpItem) => {
+
+                response.body.breakpoints.push({
+                    line: bpItem.line,
+                    source: this.createSource(file),
+                    verified: true
+                });
+
                 return <IGDB.Breakpoint>{
                     line: bpItem.line,
                     condition: bpItem.condition,
