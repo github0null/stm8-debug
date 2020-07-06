@@ -133,7 +133,7 @@ export interface IGDB {
 
     readMemory(addr: number, len: number): Promise<Memory>;
 
-    readDisassembly(command: string): Promise<string[]>;
+    readDisassembly(params: string | { start: string, length: string }): Promise<string[]>;
 
     sendCustomCommand(command: string, showLog?: boolean): Promise<CustomCommandResult>;
 }

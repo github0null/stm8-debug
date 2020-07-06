@@ -532,7 +532,10 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
     //----- disassembly
 
     private async disassembleRange(start: string, length: string): Promise<string[] | undefined> {
-        const lines = await this.gdb.readDisassembly(`${start},+${length}`);
+        const lines = await this.gdb.readDisassembly({
+            start: start,
+            length: length
+        });
         if (lines) {
             return lines;
         }

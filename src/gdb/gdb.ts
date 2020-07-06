@@ -337,8 +337,9 @@ export class GDB implements IGDB {
         });
     }
 
-    readDisassembly(command: string): Promise<string[]> {
+    readDisassembly(params: string | { start: string, length: string }): Promise<string[]> {
         return new Promise((resolve, reject) => {
+            const command: string = typeof params === 'string' ? params : (`${params.start},+${params.length}`);
             this.sendCommand(`disassemble ${command}`, this.readDisassembly.name, 'hide').then((result) => {
                 if (result.resultType === 'done' && result.data.disassembly) {
                     resolve(result.data.disassembly);
