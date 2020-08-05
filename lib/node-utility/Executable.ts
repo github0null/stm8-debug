@@ -9,11 +9,11 @@ export type ExecutableOption = { encoding?: string | null } & process.ExecFileOp
 
 export interface Executable {
 
-    readonly stdin: Writable;
+    readonly stdin: Writable | undefined;
 
-    readonly stdout: Readable;
+    readonly stdout: Readable | undefined;
 
-    readonly stderr: Readable;
+    readonly stderr: Readable | undefined;
 
     Run(exePath: string, args?: string[], options?: ExecutableOption): void;
 
@@ -45,14 +45,14 @@ export abstract class Process implements Executable {
     protected proc: process.ChildProcess | null = null;
     protected launchTimeout: number;
 
-    public stdin: Writable = <any>null;
-    public stdout: Readable = <any>null;
-    public stderr: Readable = <any>null;
+    public stdin: Writable | undefined;
+    public stdout: Readable | undefined;
+    public stderr: Readable | undefined;
 
     private _exited: boolean;
 
     constructor(timeout?: number) {
-        this.launchTimeout = timeout ? timeout : 0;
+        this.launchTimeout = timeout ? timeout : 50;
         this._event = new events.EventEmitter();
         this._exited = true;
     }

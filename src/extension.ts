@@ -25,10 +25,6 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.debug.registerDebugConfigurationProvider('stm8-debug', new STM8ConfigurationProvider()),
         vscode.languages.registerCodeLensProvider({ language: 'c' }, new CodelensProvider())
     );
-
-    process.setUncaughtExceptionCaptureCallback((err) => {
-        console.error(err);
-    });
 }
 
 export function deactivate() {

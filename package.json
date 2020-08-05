@@ -2,13 +2,12 @@
     "name": "stm8-debug",
     "displayName": "STM8 Debugger",
     "description": "STM8 Debugger for vscode",
-    "version": "0.4.0",
+    "version": "1.0.0",
     "publisher": "cl",
     "author": {
         "name": "cl",
         "email": "2584456014@qq.com"
     },
-    "preview": true,
     "keywords": [
         "stm8",
         "swim",
@@ -55,6 +54,11 @@
                     "markdownDescription": "Display statement time usage, may not be accurate",
                     "type": "boolean",
                     "default": false
+                },
+                "stm8-debug.OpenOcdPath": {
+                    "markdownDescription": "OpenOCD executable file path",
+                    "type": "string",
+                    "default": ""
                 }
             }
         },
@@ -75,8 +79,8 @@
                     "launch": {
                         "required": [
                             "executable",
-                            "cpu",
-                            "interface"
+                            "serverType",
+                            "cpu"
                         ],
                         "properties": {
                             "name": {
@@ -87,12 +91,25 @@
                             "executable": {
                                 "type": "string",
                                 "description": "executable file path, must have gdb debug symbol",
-                                "default": ".\\out\\executable.out"
+                                "default": ".\\\\out\\\\executable.out"
+                            },
+                            "serverType": {
+                                "type": "string",
+                                "description": "gdb server type",
+                                "default": "stm8-sdcc",
+                                "enum": [
+                                    "st7",
+                                    "stm8-sdcc"
+                                ],
+                                "enumDescriptions": [
+                                    "for IAR_STM8/COSMIC ELF file",
+                                    "for SDCC ELF file"
+                                ]
                             },
                             "cpu": {
                                 "type": "string",
-                                "description": "stm8 cpu name, like: STM8S105K4",
-                                "default": "STM8S105K4",
+                                "description": "stm8 cpu name, like: STM8S103F3P",
+                                "default": "STM8S103F3P",
                                 "enum": [
                                     "STM8LITE09",
                                     "STM8AF6213",
@@ -337,7 +354,7 @@
                             },
                             "interface": {
                                 "type": "string",
-                                "description": "connect interface, like: stlink3",
+                                "description": "[st7] connect interface, like: stlink3",
                                 "default": "stlink3",
                                 "enum": [
                                     "rlink",
@@ -346,8 +363,19 @@
                             },
                             "port": {
                                 "type": "string",
-                                "description": "STLink port name, like: COM3",
+                                "description": "[st7] STLink port name, like: COM3",
                                 "default": "COM3"
+                            },
+                            "openOcdConfigs": {
+                                "type": "array",
+                                "description": "[stm8-sdcc] openocd configuration files",
+                                "default": [
+                                    "interface/stlink.cfg",
+                                    "target/stm8s.cfg"
+                                ],
+                                "items": {
+                                    "type": "string"
+                                }
                             },
                             "svdFile": {
                                 "type": "string",
@@ -368,10 +396,23 @@
                     {
                         "type": "stm8-debug",
                         "request": "launch",
-                        "name": "stm8-launch",
-                        "executable": ".\\out\\executable.out",
-                        "cpu": "STM8S105K4",
+                        "name": "launch",
+                        "serverType": "st7",
+                        "executable": ".\\\\out\\\\IAR_STM8\\\\executable.out",
+                        "cpu": "STM8S103F3P",
                         "interface": "stlink3"
+                    },
+                    {
+                        "type": "stm8-debug",
+                        "request": "launch",
+                        "name": "sdcc launch",
+                        "serverType": "stm8-sdcc",
+                        "executable": ".\\\\out\\\\SDCC\\\\executable.elf",
+                        "cpu": "STM8S103F3P",
+                        "openOcdConfigs": [
+                            "interface/stlink.cfg",
+                            "target/stm8s.cfg"
+                        ]
                     }
                 ],
                 "configurationSnippets": [
@@ -381,10 +422,10 @@
                         "body": {
                             "type": "stm8-debug",
                             "request": "launch",
+                            "serverType": "stm8-sdcc",
                             "name": "${1:Launch Program}",
-                            "executable": ".\\out\\executable.out",
-                            "cpu": "STM8S105K4",
-                            "interface": "stlink3"
+                            "cpu": "STM8S103F3P",
+                            "executable": ".\\\\out\\\\executable.out"
                         }
                     }
                 ]

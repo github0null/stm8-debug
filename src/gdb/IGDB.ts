@@ -1,3 +1,4 @@
+import { type } from "os";
 
 export type GdbResultType = 'failed' | 'done';
 
@@ -56,11 +57,22 @@ export interface Variable extends VariableDefine {
     value: string | VariableChildren;
 }
 
+export type GdbServerType = 'st7' | 'stm8-sdcc';
+
 export interface ConnectOption {
+
     executable: string;
-    interface: string;
+
     cpu: string;
+    
+    serverType: GdbServerType;
+    
+    interface?: string;
+    
+    openOcdConfigs?: string[];
+
     port?: string;
+    
     customCommands?: string[];
 }
 
@@ -85,10 +97,39 @@ export interface LogData {
     msg: string;
 }
 
+export interface GdbAdapter {
+
+    // -- field
+
+    type: GdbServerType;
+
+    // -- method
+
+    getExePath(): string;
+
+    getConnectCommands(option: ConnectOption): string[];
+
+    getDisconnectCommands(): string[];
+
+    getStartDebugCommands(executable: string): string[];
+
+    // -- event 
+
+    onConnect(option: ConnectOption): Promise<ErrorMsg | undefined>;
+
+    onKill(): Promise<ErrorMsg | undefined>;
+}
+
 export interface IGDB {
 
-    start(exe: string, args?: string[]): Promise<ErrorMsg | null>;
+    /**
+     * @note launch gdb.exe process
+    */
+    launch(args?: string[]): Promise<ErrorMsg | null>;
 
+    /**
+     * @note kill gdb.exe process
+    */
     kill(): Promise<void>;
 
     on(event: 'log', lisenter: (data: LogData) => void): void;
@@ -97,15 +138,29 @@ export interface IGDB {
 
     getCommandTimeUsage(): number | undefined;
 
-    //-- gdb commands --
+    // -- launch commands --
 
-    isStopped(): boolean;
-
+    /**
+     * @note connect target board by gdb
+    */
     connect(option: ConnectOption): Promise<boolean>;
 
-    launch(executable: string, otherCommand?: string[]): Promise<boolean>;
-
+    /**
+     * @note disconnect target board by gdb
+    */
     disconnect(): Promise<void>;
+
+    /**
+     * @note start debug by **executable** file
+    */
+    startDebug(executable: string, otherCommand?: string[]): Promise<boolean>;
+
+    /**
+     * @note program is stopped
+    */
+    isStopped(): boolean;
+
+    // -- gdb commands --
 
     interrupt(): Promise<Breakpoint>;
 

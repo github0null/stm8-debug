@@ -13,6 +13,7 @@ import * as NodePath from 'path';
 import * as vscode from 'vscode';
 import { GlobalEvent } from './GlobalEvent';
 import * as util from 'util';
+import { getAdapter } from './gdb/GdbAdapters';
 
 class Subject {
 
@@ -623,6 +624,11 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
 
     private async readOptionBytes(): Promise<IGDB.Variable[] | undefined> {
 
+        // sdcc not support read option bytes
+        if (this.gdb.getAdapter().type === 'stm8-sdcc') {
+            return undefined;
+        }
+
         const result = await this.gdb.sendCustomCommand('gdi mcuoption -show');
         if (result.resultType === 'done') {
             const vList: IGDB.Variable[] = [];
@@ -658,31 +664,8 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
         response.body.supportsRestartRequest = true;
         //response.body.supportsTerminateRequest = true;
 
-        this.log(`==================== Initialize ====================\r\n`);
-
-        const resManager = ResourceManager.getInstance();
-        const gdbPath = resManager
-            .getBinDir().path + File.sep + 'gdb.exe';
-
-        // clear log
-        const logFile = File.fromArray([resManager.getBinDir().path, 'swim', 'Error.log']);
-        if (logFile.IsFile()) {
-            logFile.Write('');
-        }
-
-        const errMsg = await this.gdb.start(gdbPath, [
-            `--quiet`,
-            `--cd=${this.cwd.path}`,
-            `--directory=${this.cwd.path}`
-        ]);
-
-        if (errMsg) {
-            this.error(errMsg);
-            this.sendEvent(new TerminatedEvent());
-        } else {
-            this.sendResponse(response);
-            this.sendEvent(new InitializedEvent());
-        }
+        this.sendResponse(response);
+        this.sendEvent(new InitializedEvent());
     }
 
     // kill gdb.exe
@@ -715,6 +698,32 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
         // wait until configuration has finished (and configurationDoneRequest has been called)
         await this.configDoneEmitter.wait();
 
+        // init
+        this.log(`==================== Initialize ====================\r\n`);
+
+        const adpTag: IGDB.GdbServerType = args.serverType || 'st7';
+        const adapter = getAdapter(adpTag);
+        if (adapter === undefined) {
+            this.error(`Not found gdb adapter: '${adpTag}'`);
+            this.sendEvent(new TerminatedEvent()); // launch failed, exit
+            return;
+        }
+
+        this.gdb.initAdapter(adapter);
+
+        // launch gdb.exe process
+        const errMsg = await this.gdb.launch([
+            `--quiet`,
+            `--cd=${this.cwd.path}`,
+            `--directory=${this.cwd.path}`
+        ]);
+
+        if (errMsg) {
+            this.error(errMsg);
+            this.sendEvent(new TerminatedEvent()); // launch failed, exit
+            return;
+        }
+
         // load svd
         try {
             if (args.svdFile) {
@@ -737,30 +746,32 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
         // connect to gdb
         this.log(`\r\n==================== Connect ====================\r\n`);
         this.isConnected = await this.gdb.connect(args);
-        if (this.isConnected) {
-
-            // other custom commands
-            const extraCommands: string[] = [];
-
-            if (args.runToMain !== false) {
-                extraCommands.push('break main');
-            }
-
-            this.log(`\r\n==================== Launch ====================\r\n`);
-            const launched = await this.gdb.launch(args.executable, extraCommands);
-            if (launched) {
-                this.sendResponse(response);
-                await this.loadBreakPoints();
-                const bkpt = await this.gdb.continue();
-                if (bkpt) {
-                    this.sendEvent(new StoppedEvent(args.runToMain !== false ? 'entry' : 'breakpoint', this.ThreadID));
-                }
-                return;
-            }
+        if (!this.isConnected) {
+            this.sendEvent(new TerminatedEvent()); // launch failed, exit
+            return;
         }
 
-        // launch failed, exit
-        this.sendEvent(new TerminatedEvent());
+        // other custom commands
+        const extraCommands: string[] = [];
+
+        if (args.runToMain !== false) {
+            extraCommands.push('break main');
+        }
+
+        this.log(`\r\n==================== Launch ====================\r\n`);
+        const launched = await this.gdb.startDebug(args.executable, extraCommands);
+        if (!launched) {
+            this.sendEvent(new TerminatedEvent()); // launch failed, exit
+            return;
+        }
+
+        this.sendResponse(response); // launch done !
+
+        await this.loadBreakPoints();
+        const bkpt = await this.gdb.continue();
+        if (bkpt) {
+            this.sendEvent(new StoppedEvent(args.runToMain !== false ? 'entry' : 'breakpoint', this.ThreadID));
+        }
     }
 
     protected async restartRequest(response: DebugProtocol.RestartResponse, args: DebugProtocol.RestartArguments) {

@@ -2,6 +2,10 @@
 
 All notable changes to the "stm8-debug" extension will be documented in this file.
 
+## [v1.0.0]
+- New: support SDCC elf file
+***
+
 ## [v0.4.0]
 - New: add mcu option bytes view
 ***

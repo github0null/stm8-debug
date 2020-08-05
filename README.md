@@ -17,12 +17,15 @@ A STM8 Debugger for vscode. Use GDB to debug your STM8 program
 ### Preparatory work
 
 1. Install STLink or RLink driver program
+2. If you want to use **SDCC elf** to debug, you must install OpenOCD and set path
 
 ***
 
 ### Start 🏃‍♀️
 
-1. Fill in `launch.json`, like: this
+1. Fill in `launch.json`, there are some examples
+
+- **Use IAR/COSMIC ELF :**
 
 ```json
 {
@@ -32,9 +35,31 @@ A STM8 Debugger for vscode. Use GDB to debug your STM8 program
             "type": "stm8-debug",
             "request": "launch",
             "name": "Launch Program",
+            "serverType": "st7",
             "executable": ".\\out\\IAR_STM8\\stm8_demo.out",
-            "cpu": "STM8S105K4",
-            "interface": "stlink3"
+            "cpu": "STM8S103F3P"
+        }
+    ]
+}
+```
+
+- **Use SDCC ELF :**
+
+```json
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "stm8-debug",
+            "request": "launch",
+            "name": "Launch Program",
+            "serverType": "stm8-sdcc",
+            "executable": ".\\out\\SDCC\\stm8_demo.out",
+            "cpu": "STM8S103F3P",
+            "openOcdConfigs": [
+                "interface/stlink.cfg",
+                "target/stm8s.cfg"
+            ]
         }
     ]
 }

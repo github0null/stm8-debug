@@ -1,22 +1,30 @@
-import { IGDB, GdbResult, Breakpoint, Stack, Variable, ErrorMsg, VariableDefine, ResultData, ConnectOption, LogType, LogData, Memory, CustomCommandResult } from "./IGDB";
+import { IGDB, GdbResult, Breakpoint, Stack, Variable, ErrorMsg, VariableDefine, ResultData, ConnectOption, LogType, LogData, Memory, CustomCommandResult, GdbAdapter } from "./IGDB";
 import { EventEmitter } from 'events';
 import { Executable, ExeFile } from '../../lib/node-utility/Executable';
 import * as path from 'path';
+import { Writable, Readable } from "stream";
 
 export class GDB implements IGDB {
 
     private readonly COMMAND_INTRRUPT: string = 'interrupt';
     private readonly SIGNAL_INTRRUPT: NodeJS.Signals = 'SIGSTOP';
 
-    private _event: EventEmitter;
+    protected _event: EventEmitter;
     private parser: GdbParser;
-    private stopped: boolean;
-
     private cmdQueue: CommandQueue;
+    private gdbAdapter: GdbAdapter = <any>null;
+
     private nextID: number = 0;
     private hiddenMsgType?: LogType;
-
     private prevTimeUsage: number | undefined;
+    private stopped: boolean;
+
+    on(event: 'log', lisenter: (data: LogData) => void): void;
+    on(event: any, lisenter: (arg: any) => void): void {
+        this._event.on(event, lisenter);
+    }
+
+    //--------
 
     constructor(verbose?: boolean) {
         this._event = new EventEmitter();
@@ -37,15 +45,24 @@ export class GDB implements IGDB {
         return this.nextID++;
     }
 
+    //--
+
+    initAdapter(adapter: GdbAdapter) {
+        this.gdbAdapter = adapter;
+    }
+
+    getAdapter(): GdbAdapter {
+        return this.gdbAdapter;
+    }
+
     async connect(option: ConnectOption): Promise<boolean> {
 
-        const portString = option.port ? `-port ${option.port}` : '';
+        const errMsg = await this.gdbAdapter.onConnect(option);
+        if (errMsg) {
+            return false;
+        }
 
-        const commandList: string[] = [
-            `file "${option.executable}"`,
-            `target gdi -dll swim\\stm_swim.dll -${option.interface} ${portString}`,
-            `mcuname -set ${option.cpu}`
-        ];
+        const commandList = this.gdbAdapter.getConnectCommands(option);
 
         for (const cmd of commandList) {
             const res = await this.sendCommand(cmd, this.connect.name);
@@ -64,15 +81,21 @@ export class GDB implements IGDB {
         return true;
     }
 
-    async launch(executable: string, otherCommand?: string[]): Promise<boolean> {
+    async disconnect(): Promise<void> {
 
-        const commandList: string[] = [
-            `load "${executable}"`,
-            `reset`
-        ];
+        const commandList = this.gdbAdapter.getDisconnectCommands();
 
         for (const cmd of commandList) {
-            const res = await this.sendCommand(cmd, this.launch.name);
+            await this.sendCommand(cmd, this.disconnect.name, 'log');
+        }
+    }
+
+    async startDebug(executable: string, otherCommand?: string[] | undefined): Promise<boolean> {
+
+        const commandList = this.gdbAdapter.getStartDebugCommands(executable);
+
+        for (const cmd of commandList) {
+            const res = await this.sendCommand(cmd, this.startDebug.name);
             if (res.resultType === 'failed') {
                 return false;
             }
@@ -80,24 +103,119 @@ export class GDB implements IGDB {
 
         if (otherCommand) {
             for (const cmd of otherCommand) {
-                await this.sendCommand(cmd, this.launch.name, 'hide');
+                await this.sendCommand(cmd, this.startDebug.name, 'hide');
             }
         }
 
         return true;
     }
 
-    async disconnect(): Promise<void> {
+    async launch(args?: string[] | undefined): Promise<ErrorMsg | null> {
 
-        const commands: string[] = [
-            'delete',
-            'symbol-file',
-            'target gdi -close'
-        ];
+        this.cmdQueue.on('error', (err) => {
+            this.log('error', `${err.message} : \r\n${err.stack}`);
+        });
 
-        for (const cmd of commands) {
-            await this.sendCommand(cmd, this.disconnect.name, 'log');
-        }
+        // log launch msg
+        const launchHandler = (data: CommandResult) => {
+            if (data.id === CommandQueue.NULL_ID) {
+                this.cmdQueue.removeListener('lines', launchHandler);
+                if (data.lines.length > 0) {
+                    this.log('warning', data.lines.join('\r\n'));
+                }
+            }
+        };
+
+        this.cmdQueue.on('lines', launchHandler);
+
+        return await this.cmdQueue.launch(this.gdbAdapter.getExePath(), args);
+    }
+
+    async kill(): Promise<void> {
+        await this.gdbAdapter.onKill();
+        await this.cmdQueue.kill();
+    }
+
+    sendCommand(command: string, funcName: string, logType: LogType = 'log'): Promise<GdbResult> {
+
+        return new Promise((resolve) => {
+
+            const id = this.obtainID();
+
+            const dathandler = (data: CommandResult) => {
+                if (data.id === id) {
+
+                    const lines = data.lines;
+                    this.cmdQueue.removeListener('lines', dathandler);
+
+                    // set command's time usage
+                    this.prevTimeUsage = data.timeUsage;
+
+                    try {
+                        const result = this.parser.parse(funcName, lines);
+
+                        if (result.resultType === 'failed') {
+                            this.log('error', `[ERROR]: ${command}`);
+                            this.log('error', lines.map((ln) => { return `\t${ln}`; }).join('\r\n'));
+                            this.log('error', '[END]');
+                        }
+                        else if (logType !== 'hide') {
+                            this.log(logType, `[SEND]: ${command}`);
+                            this.log(logType, lines.map((ln) => { return `\t${ln}`; }).join('\r\n'));
+                            this.log(logType, '[END]');
+                        }
+
+                        resolve(result);
+
+                    } catch (error) {
+
+                        const rData = new ResultData();
+                        this.log('error', `[Parser Error]: ${(<Error>error).message}`);
+
+                        resolve({
+                            resultType: 'failed',
+                            error: `parse error: ${(<Error>error).message}`,
+                            data: rData,
+                            logs: []
+                        });
+                    }
+                }
+            };
+
+            this.cmdQueue.on('lines', dathandler);
+
+            // send command
+            if (command !== this.COMMAND_INTRRUPT) {
+                this.cmdQueue.once('write-done', (data) => {
+                    if (data.id === id && data.err) {
+                        this.log('error', data.err.message);
+                        resolve({
+                            resultType: 'failed',
+                            data: Object.create(null),
+                            error: data.err.message,
+                            logs: []
+                        });
+                    }
+                });
+                this.cmdQueue.writeLine(id, `${command}`);
+            } else {
+                try {
+                    this.cmdQueue.signal(id, this.SIGNAL_INTRRUPT);
+                } catch (err) {
+                    this.log('error', err.message);
+                    resolve({
+                        resultType: 'failed',
+                        data: Object.create(null),
+                        error: err.message,
+                        logs: []
+                    });
+                }
+            }
+        });
+    }
+
+    getCommandTimeUsage(): number | undefined {
+        return this.prevTimeUsage;
     }
 
     isStopped(): boolean {
@@ -362,120 +480,6 @@ export class GDB implements IGDB {
             }, reject);
         });
     }
-
-    //======================================================
-
-    on(event: 'log', lisenter: (data: LogData) => void): void;
-    on(event: any, lisenter: (arg: any) => void): void {
-        this._event.on(event, lisenter);
-    }
-
-    async start(exe: string, args?: string[] | undefined): Promise<ErrorMsg | null> {
-
-        this.cmdQueue.on('error', (err) => {
-            this.log('error', `${err.message} : \r\n${err.stack}`);
-        });
-
-        // log launch msg
-        const launchHandler = (data: CommandResult) => {
-            if (data.id === CommandQueue.NULL_ID) {
-                this.cmdQueue.removeListener('lines', launchHandler);
-                if (data.lines.length > 0) {
-                    this.log('warning', data.lines.join('\r\n'));
-                }
-            }
-        };
-
-        this.cmdQueue.on('lines', launchHandler);
-
-        return await this.cmdQueue.launch(exe, args);
-    }
-
-    async kill(): Promise<void> {
-        await this.cmdQueue.kill();
-    }
-
-    sendCommand(command: string, funcName: string, logType: LogType = 'log'): Promise<GdbResult> {
-
-        return new Promise((resolve) => {
-
-            const id = this.obtainID();
-
-            const dathandler = (data: CommandResult) => {
-                if (data.id === id) {
-
-                    const lines = data.lines;
-                    this.cmdQueue.removeListener('lines', dathandler);
-
-                    // set command's time usage
-                    this.prevTimeUsage = data.timeUsage;
-
-                    try {
-                        const result = this.parser.parse(funcName, lines);
-
-                        if (result.resultType === 'failed') {
-                            this.log('error', `[ERROR]: ${command}`);
-                            this.log('error', lines.map((ln) => { return `\t${ln}`; }).join('\r\n'));
-                            this.log('error', '[END]');
-                        }
-                        else if (logType !== 'hide') {
-                            this.log(logType, `[SEND]: ${command}`);
-                            this.log(logType, lines.map((ln) => { return `\t${ln}`; }).join('\r\n'));
-                            this.log(logType, '[END]');
-                        }
-
-                        resolve(result);
-
-                    } catch (error) {
-
-                        const rData = new ResultData();
-                        this.log('error', `[Parser Error]: ${(<Error>error).message}`);
-
-                        resolve({
-                            resultType: 'failed',
-                            error: `parse error: ${(<Error>error).message}`,
-                            data: rData,
-                            logs: []
-                        });
-                    }
-                }
-            };
-
-            this.cmdQueue.on('lines', dathandler);
-
-            // send command
-            if (command !== this.COMMAND_INTRRUPT) {
-                this.cmdQueue.once('write-done', (data) => {
-                    if (data.id === id && data.err) {
-                        this.log('error', data.err.message);
-                        resolve({
-                            resultType: 'failed',
-                            data: Object.create(null),
-                            error: data.err.message,
-                            logs: []
-                        });
-                    }
-                });
-                this.cmdQueue.writeLine(id, `${command}`);
-            } else {
-                try {
-                    this.cmdQueue.signal(id, this.SIGNAL_INTRRUPT);
-                } catch (err) {
-                    this.log('error', err.message);
-                    resolve({
-                        resultType: 'failed',
-                        data: Object.create(null),
-                        error: err.message,
-                        logs: []
-                    });
-                }
-            }
-        });
-    }
-
-    getCommandTimeUsage(): number | undefined {
-        return this.prevTimeUsage;
-    }
 }
 
 class Queue<T> {
@@ -560,8 +564,8 @@ class CommandQueue {
 
             this.proc.Run(exe, args, { encoding: 'utf8' });
 
-            this.proc.stdout.on('data', this.onData.bind(this));
-            this.proc.stderr.on('data', this.onData.bind(this));
+            (<Readable>this.proc.stdout).on('data', this.onData.bind(this));
+            (<Readable>this.proc.stderr).on('data', this.onData.bind(this));
         });
     }
 
@@ -597,7 +601,7 @@ class CommandQueue {
             this.writeWait(id, `${line}\r\n`);
         } else {
             this.writeBusy = true;
-            this.proc.stdin.write(`${line}\r\n`, (err) => {
+            (<Writable>this.proc.stdin).write(`${line}\r\n`, (err) => {
                 this.timer.start(`${id}`); // count time
                 this._event.emit('write-done', <WriteResult>{ id: id, err: err });
             });
@@ -635,7 +639,7 @@ class CommandQueue {
             if (this.cmdQueue.count() > 0) {
                 this.writeBusy = true;
                 const data = <CommandData>this.cmdQueue.dequeue();
-                this.proc.stdin.write(data.line, (err) => {
+                (<Writable>this.proc.stdin).write(data.line, (err) => {
                     this.timer.start(`${data.id}`); // count time
                     this._event.emit('write-done', <WriteResult>{ id: data.id, err: err });
                 });

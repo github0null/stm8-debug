@@ -50,6 +50,10 @@ export class ResourceManager {
         return this.workspaceDir;
     }
 
+    getOpenOCDPath(): string {
+        return this.getAppConfig().get<string>('OpenOcdPath') || 'openocd';
+    }
+
     isVerboseMode(): boolean {
         return this.getAppConfig().get<boolean>('UseVerboseMode') || false;
     }
