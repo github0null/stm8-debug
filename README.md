@@ -2,7 +2,7 @@
 
 ## Summary 📑
 
-A STM8 Debugger for vscode. Use GDB to debug your STM8 program
+A STM8 Debugger for vscode. Use STLink to debug your STM8 program
 
 **Only for Windows platform**
 
@@ -17,15 +17,15 @@ A STM8 Debugger for vscode. Use GDB to debug your STM8 program
 ### Preparatory work
 
 1. Install STLink or RLink driver program
-2. If you want to use **SDCC elf** to debug, you must install OpenOCD and set path
+2. If you want to debug **SDCC stm8 program**, you must install OpenOCD and set path
 
 ***
 
 ### Start 🏃‍♀️
 
-1. Fill in `launch.json`, there are some examples
+1. Fill in `launch.json`, there are some examples: 
 
-- **Use IAR/COSMIC ELF :**
+- **Use IAR/COSMIC Toolchain :**
 
 ```json
 {
@@ -36,14 +36,14 @@ A STM8 Debugger for vscode. Use GDB to debug your STM8 program
             "request": "launch",
             "name": "Launch Program",
             "serverType": "st7",
-            "executable": ".\\out\\IAR_STM8\\stm8_demo.out",
-            "cpu": "STM8S103F3P"
+            "executable": ".\\out\\Debug\\stm8_demo.out",
+            "cpu": "STM8S003F3P"
         }
     ]
 }
 ```
 
-- **Use SDCC ELF :**
+- **Use SDCC Toolchain :**
 
 ```json
 {
@@ -54,36 +54,41 @@ A STM8 Debugger for vscode. Use GDB to debug your STM8 program
             "request": "launch",
             "name": "Launch Program",
             "serverType": "stm8-sdcc",
-            "executable": ".\\out\\SDCC\\stm8_demo.out",
-            "cpu": "STM8S103F3P",
+            "executable": ".\\out\\Debug\\stm8_demo.elf",
+            "cpu": "STM8S003F3P",
             "openOcdConfigs": [
                 "interface/stlink.cfg",
-                "target/stm8s.cfg"
+                "target/stm8s003.cfg"
             ]
         }
     ]
 }
 ```
 
-2. connect target board, press `F5` to launch stm8 debugger
+2. link your STLink and board, press `F5` to launch stm8 debugger
 
 ***
 
-## Other support
+## Peripheral View support
 
-### built-in peripheral support
+You can browse **cpu peripheral value** by **Peripheral View**, like this:
+
+![peripheral view](./image/peripheral_view.png)
+
+
+#### built-in peripheral view support
 
 - stm8s103f3
 - stm8s003f3
 - stm8s105k4
 
-### custom peripheral support
+#### custom peripheral view support
 
-**You can create a new \<CPU name>.svd.json to support a new stm8 cpu.**
+**Note:** You need to create a new **\<cpu_name>.svd.json** file to support a new stm8 cpu.
 
-1. create a new `<CPU name>.svd.json` file, write peripheral descriptions.
+step 1. create a new **<cpu_name>.svd.json** file, write peripheral descriptions.
 
-2. set `svdFile` property in `launch.json`
+step 2. set **svdFile** property in **launch.json**
 
 ***
 

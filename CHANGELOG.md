@@ -2,6 +2,10 @@
 
 All notable changes to the "stm8-debug" extension will be documented in this file.
 
+## [v1.1.0]
+- Fixed: gdb.exe not exit when debugger exit
+***
+
 ## [v1.0.0]
 - New: support SDCC elf file
 ***
