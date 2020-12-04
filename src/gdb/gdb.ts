@@ -1,13 +1,17 @@
 import { IGDB, GdbResult, Breakpoint, Stack, Variable, ErrorMsg, VariableDefine, ResultData, ConnectOption, LogType, LogData, Memory, CustomCommandResult, GdbAdapter } from "./IGDB";
 import { EventEmitter } from 'events';
-import { Executable, ExeFile } from '../../lib/node-utility/Executable';
+import { Executable, ExeFile, ExeCmd } from '../../lib/node-utility/Executable';
 import * as path from 'path';
 import { Writable, Readable } from "stream";
+import { ResourceManager } from "../ResourceManager";
+import { File } from "../../lib/node-utility/File";
+import * as child_process from 'child_process';
+import { kill } from "../platform";
 
 export class GDB implements IGDB {
 
     private readonly COMMAND_INTRRUPT: string = 'interrupt';
-    private readonly SIGNAL_INTRRUPT: NodeJS.Signals = 'SIGSTOP';
+    private readonly SIGNAL_INTRRUPT: NodeJS.Signals = 'SIGINT';
 
     protected _event: EventEmitter;
     private parser: GdbParser;
@@ -184,8 +188,7 @@ export class GDB implements IGDB {
 
             this.cmdQueue.on('lines', dathandler);
 
-            // send command
-            if (command !== this.COMMAND_INTRRUPT) {
+            if (command !== this.COMMAND_INTRRUPT) { // normal command
                 this.cmdQueue.once('write-done', (data) => {
                     if (data.id === id && data.err) {
                         this.log('error', data.err.message);
@@ -198,7 +201,8 @@ export class GDB implements IGDB {
                     }
                 });
                 this.cmdQueue.writeLine(id, `${command}`);
-            } else {
+            }
+            else { // interrupt command
                 try {
                     this.cmdQueue.signal(id, this.SIGNAL_INTRRUPT);
                 } catch (err) {
@@ -574,8 +578,15 @@ class CommandQueue {
         this.proc.signal(sig);
     }
 
+    getPid(): number | undefined {
+        return this.proc.pid();
+    }
+
     async kill() {
-        await this.proc.Kill();
+        const pid = this.proc.pid();
+        if(pid) {
+            kill(pid);
+        }
     }
 
     on(event: 'error', lisenter: (err: Error) => void): void;

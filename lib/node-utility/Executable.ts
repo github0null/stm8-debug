@@ -15,13 +15,15 @@ export interface Executable {
 
     readonly stderr: Readable | undefined;
 
-    Run(exePath: string, args?: string[], options?: ExecutableOption): void;
+    Run(path_or_cmd: string, args?: string[], options?: ExecutableOption): void;
 
     Kill(): Promise<void>;
 
     IsExit(): boolean;
 
     signal(signal: NodeJS.Signals): void;
+
+    pid(): number | undefined;
 
     on(event: 'launch', listener: (launchOk?: boolean) => void): this;
 
@@ -131,6 +133,10 @@ export abstract class Process implements Executable {
 
     IsExit(): boolean {
         return this._exited;
+    }
+    
+    pid(): number | undefined {
+        return this.proc?.pid;
     }
 
     protected abstract Execute(exePath: string, args?: string[] | undefined, options?: ExecutableOption | undefined): process.ChildProcess;

@@ -668,15 +668,18 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
         this.sendEvent(new InitializedEvent());
     }
 
-    // kill gdb.exe
-    protected async disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments) {
+    protected async terminateRequest(response: DebugProtocol.TerminateResponse, args: DebugProtocol.TerminateArguments, request?: DebugProtocol.Request) {
+    }
+
+    protected disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments) {  
         this.log('[SEND]: kill gdb.exe');
-        await this.gdb.kill();
-        this.log('\tdone');
-        this.log('[END]');
-        this.isConnected = false;
-        GlobalEvent.emit('debug.terminal');
-        this.sendResponse(response);
+        this.gdb.kill().then(() => {
+            this.log('\tdone');
+            this.log('[END]');
+            this.isConnected = false;
+            GlobalEvent.emit('debug.terminal');
+            this.sendResponse(response); 
+        });
     }
 
 	/**
