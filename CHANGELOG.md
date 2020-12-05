@@ -2,6 +2,11 @@
 
 All notable changes to the "stm8-debug" extension will be documented in this file.
 
+## [v1.2.0]
+- Fixed: can not interrupt program
+- Fixed: can not hit breakpoint
+***
+
 ## [v1.1.0]
 - Fixed: gdb.exe not exit when debugger exit
 ***

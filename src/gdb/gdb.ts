@@ -938,6 +938,15 @@ class GdbParser {
                 }
                 break;
             case this.gdb.getGlobalVariables.name:
+
+                // skip prase sdcc 'Non-debugging symbols':
+                // Non-debugging symbols:
+                // 0x0000801b  A$maint\Debug\main$76
+                // 0x0000801e  A$maint\Debug\main$77
+                if(line.startsWith('0x')) {
+                    return;
+                }
+
                 // global variable define
                 if (this.regexpList['varDefine'].test(line)) {
                     const match = this.regexpList['varDefine'].exec(line);
