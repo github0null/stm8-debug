@@ -37,6 +37,8 @@ class GdbST7 implements GdbAdapter {
         const portString = option.port ? `-port ${option.port}` : '';
         const interfaceStr = option.interface ? option.interface : 'stlink3';
         return [
+            `set print elements 0`, // full print char array
+            `set width 0`, // disable multi-line
             `file "${option.executable}"`,
             `target gdi -dll swim\\stm_swim.dll -${interfaceStr} ${portString}`,
             `mcuname -set ${option.cpu}`
@@ -152,6 +154,8 @@ class GdbSDCC implements GdbAdapter {
 
     getConnectCommands(option: ConnectOption): string[] {
         return [
+            `set print elements 0`, // full print char array
+            `set width 0`, // disable multi-line
             `file "${option.executable}"`,
             `target extended-remote localhost:3333`
         ];

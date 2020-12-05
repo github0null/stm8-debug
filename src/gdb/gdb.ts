@@ -7,10 +7,11 @@ import { ResourceManager } from "../ResourceManager";
 import { File } from "../../lib/node-utility/File";
 import * as child_process from 'child_process';
 import { kill } from "../platform";
+import { EOL } from "os";
+import { isNullOrUndefined } from "util";
 
 export class GDB implements IGDB {
 
-    private readonly COMMAND_INTRRUPT: string = 'interrupt';
     private readonly SIGNAL_INTRRUPT: NodeJS.Signals = 'SIGINT';
 
     protected _event: EventEmitter;
@@ -123,14 +124,14 @@ export class GDB implements IGDB {
         // log launch msg
         const launchHandler = (data: CommandResult) => {
             if (data.id === CommandQueue.NULL_ID) {
-                this.cmdQueue.removeListener('lines', launchHandler);
+                this.cmdQueue.removeListener('frame', launchHandler);
                 if (data.lines.length > 0) {
                     this.log('warning', data.lines.join('\r\n'));
                 }
             }
         };
 
-        this.cmdQueue.on('lines', launchHandler);
+        this.cmdQueue.on('frame', launchHandler);
 
         return await this.cmdQueue.launch(this.gdbAdapter.getExePath(), args);
     }
@@ -150,7 +151,7 @@ export class GDB implements IGDB {
                 if (data.id === id) {
 
                     const lines = data.lines;
-                    this.cmdQueue.removeListener('lines', dathandler);
+                    this.cmdQueue.removeListener('frame', dathandler);
 
                     // set command's time usage
                     this.prevTimeUsage = data.timeUsage;
@@ -186,35 +187,20 @@ export class GDB implements IGDB {
                 }
             };
 
-            this.cmdQueue.on('lines', dathandler);
-
-            if (command !== this.COMMAND_INTRRUPT) { // normal command
-                this.cmdQueue.once('write-done', (data) => {
-                    if (data.id === id && data.err) {
-                        this.log('error', data.err.message);
-                        resolve({
-                            resultType: 'failed',
-                            data: Object.create(null),
-                            error: data.err.message,
-                            logs: []
-                        });
-                    }
-                });
-                this.cmdQueue.writeLine(id, `${command}`);
-            }
-            else { // interrupt command
-                try {
-                    this.cmdQueue.signal(id, this.SIGNAL_INTRRUPT);
-                } catch (err) {
-                    this.log('error', err.message);
+            this.cmdQueue.on('frame', dathandler);
+            this.cmdQueue.once('write-done', (data) => {
+                if (data.id === id && data.err) {
+                    this.log('error', data.err.message);
                     resolve({
                         resultType: 'failed',
                         data: Object.create(null),
-                        error: err.message,
+                        error: data.err.message,
                         logs: []
                     });
                 }
-            }
+            });
+
+            this.cmdQueue.writeLine(id, `${command}`);
         });
     }
 
@@ -236,13 +222,22 @@ export class GDB implements IGDB {
     */
     interrupt(): Promise<Breakpoint> {
         return new Promise((resolve, reject) => {
-            this.sendCommand(this.COMMAND_INTRRUPT, this.interrupt.name, 'warning').then((result) => {
-                if (result.resultType === 'done') {
+
+            this.stopped = false;
+
+            const dataHander = (lines: string[]) => {
+                const result = this.parser.parse(this.continue.name, lines);
+                if (result.data.bkpt['line'] !== undefined) {
                     this.stopped = true;
+                    this.cmdQueue.removeListener('standalone-data', dataHander);
                     resolve(result.data.bkpt);
-                } else {
-                    resolve();
                 }
+            };
+            
+            this.cmdQueue.on('standalone-data', dataHander); // wait breakpoint hit
+
+            this.sendCommand('interrupt', this.interrupt.name, 'warning').then((result) => {
+                // interrupt ok
             }, reject);
         });
     }
@@ -252,14 +247,22 @@ export class GDB implements IGDB {
     */
     continue(): Promise<Breakpoint> {
         return new Promise((resolve, reject) => {
+
             this.stopped = false;
-            this.sendCommand('continue', this.continue.name, 'warning').then((result) => {
-                if (result.resultType === 'done') {
+
+            const dataHander = (lines: string[]) => {
+                const result = this.parser.parse(this.continue.name, lines);
+                if (result.data.bkpt['line'] !== undefined) {
                     this.stopped = true;
+                    this.cmdQueue.removeListener('standalone-data', dataHander);
                     resolve(result.data.bkpt);
-                } else {
-                    resolve();
                 }
+            };
+            
+            this.cmdQueue.on('standalone-data', dataHander); // wait breakpoint hit
+
+            this.sendCommand('continue&', this.continue.name, 'warning').then((result) => {
+                // continue ok
             }, reject);
         });
     }
@@ -584,23 +587,27 @@ class CommandQueue {
 
     async kill() {
         const pid = this.proc.pid();
-        if(pid) {
+        if (pid) {
             kill(pid);
         }
     }
 
     on(event: 'error', lisenter: (err: Error) => void): void;
-    on(event: 'lines', lisenter: (data: CommandResult) => void): void;
+    on(event: 'standalone-data', lisenter: (lines: string[]) => void): void;
+    on(event: 'frame', lisenter: (data: CommandResult) => void): void;
     on(event: any, lisenter: (arg: any) => void): void {
         this._event.on(event, lisenter);
     }
 
     once(event: 'write-done', lisenter: (result: WriteResult) => void): void;
+    once(event: 'standalone-data', lisenter: (lines: string[]) => void): void;
     once(event: any, lisenter: (arg: any) => void): void {
         this._event.once(event, lisenter);
     }
 
-    removeListener(event: 'lines', listener: (argc: any) => void) {
+    removeListener(event: 'standalone-data', listener: (lines: string[]) => void): void;
+    removeListener(event: 'frame', listener: (data: CommandResult) => void): void;
+    removeListener(event: any, listener: (argc: any) => void): void {
         this._event.removeListener(event, listener);
     }
 
@@ -611,6 +618,7 @@ class CommandQueue {
         if (this.writeBusy) {
             this.writeWait(id, `${line}\r\n`);
         } else {
+            console.log(line); // log to console
             this.writeBusy = true;
             (<Writable>this.proc.stdin).write(`${line}\r\n`, (err) => {
                 this.timer.start(`${id}`); // count time
@@ -630,7 +638,7 @@ class CommandQueue {
         // log to console
         console.log(chunk);
 
-        if (this.strBuf.getLastLine().startsWith('(gdb)')) {
+        if (this.strBuf.getLastLine().startsWith('(gdb)')) { // a gdb frame
 
             // get time usage
             const id = this.idQueue.count() > 0 ? <number>this.idQueue.dequeue() : CommandQueue.NULL_ID;
@@ -640,7 +648,7 @@ class CommandQueue {
             const lines = this.strBuf.toList();
             this.strBuf.clear();
             lines.splice(lines.length - 1);
-            this._event.emit('lines', <CommandResult>{
+            this._event.emit('frame', <CommandResult>{
                 id: id,
                 lines: lines,
                 timeUsage: timeUsage
@@ -650,6 +658,7 @@ class CommandQueue {
             if (this.cmdQueue.count() > 0) {
                 this.writeBusy = true;
                 const data = <CommandData>this.cmdQueue.dequeue();
+                console.log(data.line); // log to console
                 (<Writable>this.proc.stdin).write(data.line, (err) => {
                     this.timer.start(`${data.id}`); // count time
                     this._event.emit('write-done', <WriteResult>{ id: data.id, err: err });
@@ -657,6 +666,9 @@ class CommandQueue {
             } else {
                 this.writeBusy = false;
             }
+        }
+        else if (this.idQueue.count() === 0) { // standalone data
+            this._event.emit('standalone-data', this.strBuf.toList());
         }
     }
 }
@@ -682,31 +694,53 @@ class Timer {
 
 class StringBuffer {
 
-    private buf: string;
+    private line_list: string[];
+    private _event: EventEmitter;
 
     constructor() {
-        this.buf = '';
+        this.line_list = [];
+        this._event = new EventEmitter();
     }
 
-    append(str: string): string {
-        return this.buf += str;
+    on(event: 'line', lisenter: (line: string) => void): void;
+    on(event: any, lisenter: (param: any) => void): void {
+        this._event.on(event, lisenter);
+    }
+
+    private emit(event: 'line', line: string): void;
+    private emit(event: any, param: any): void {
+        this._event.emit(event, param);
+    }
+
+    append(str: string): void {
+        const nList = str.split(/\r\n|\n/);
+        for (let line of nList) {
+            if (line !== '') {
+                this.line_list.push(line);
+                this.emit('line', line);
+            }
+        }
     }
 
     toString(): string {
-        return this.buf;
+        return this.line_list.join(EOL);
     }
 
     toList(): string[] {
-        return this.buf.split(/\r\n|\n/);
+        return this.line_list;
     }
 
     getLastLine(): string {
-        const index = this.buf.lastIndexOf('\n');
-        return index !== -1 ? this.buf.substr(index + 1) : this.buf;
+
+        if (this.line_list.length > 0) {
+            return this.line_list[this.line_list.length - 1];
+        }
+
+        return '';
     }
 
     clear() {
-        this.buf = '';
+        this.line_list = [];
     }
 }
 
