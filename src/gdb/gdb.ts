@@ -233,7 +233,7 @@ export class GDB implements IGDB {
                     resolve(result.data.bkpt);
                 }
             };
-            
+
             this.cmdQueue.on('standalone-data', dataHander); // wait breakpoint hit
 
             this.sendCommand('interrupt', this.interrupt.name, 'warning').then((result) => {
@@ -245,25 +245,37 @@ export class GDB implements IGDB {
     /**
      * Breakpoint 1, main () at c:\Users\admin_cl\Desktop\test\test_C51\multi-project\stm8_demo\src\main.c:40
     */
-    continue(): Promise<Breakpoint> {
+    continue(syncMode?: boolean): Promise<Breakpoint> {
         return new Promise((resolve, reject) => {
 
             this.stopped = false;
 
-            const dataHander = (lines: string[]) => {
-                const result = this.parser.parse(this.continue.name, lines);
-                if (result.data.bkpt['line'] !== undefined) {
-                    this.stopped = true;
-                    this.cmdQueue.removeListener('standalone-data', dataHander);
-                    resolve(result.data.bkpt);
-                }
-            };
-            
-            this.cmdQueue.on('standalone-data', dataHander); // wait breakpoint hit
+            if (syncMode) { // sync mode
 
-            this.sendCommand('continue&', this.continue.name, 'warning').then((result) => {
-                // continue ok
-            }, reject);
+                this.sendCommand('continue', this.continue.name, 'warning').then((result) => {
+                    if (result.data.bkpt['line'] !== undefined) {
+                        this.stopped = true;
+                        resolve(result.data.bkpt);
+                    }
+                }, reject);
+
+            } else { // async mode
+
+                const dataHander = (lines: string[]) => {
+                    const result = this.parser.parse(this.continue.name, lines);
+                    if (result.data.bkpt['line'] !== undefined) {
+                        this.stopped = true;
+                        this.cmdQueue.removeListener('standalone-data', dataHander);
+                        resolve(result.data.bkpt);
+                    }
+                };
+
+                this.cmdQueue.on('standalone-data', dataHander); // wait breakpoint hit
+
+                this.sendCommand('continue&', this.continue.name, 'warning').then((result) => {
+                    // continue ok
+                }, reject);
+            }
         });
     }
 
@@ -943,7 +955,7 @@ class GdbParser {
                 // Non-debugging symbols:
                 // 0x0000801b  A$maint\Debug\main$76
                 // 0x0000801e  A$maint\Debug\main$77
-                if(line.startsWith('0x')) {
+                if (line.startsWith('0x')) {
                     return;
                 }
 

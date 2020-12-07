@@ -93,6 +93,7 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
     private configDoneEmitter: Subject = new Subject();
     private isConnected: boolean = false;
     private stringAsArray: boolean;
+    private useSyncMode: boolean = false;
 
     private globalVars: string[] = [];
     private vHandles: Handles<Variable[]>;
@@ -705,6 +706,11 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
         this.log(`==================== Initialize ====================\r\n`);
 
         const adpTag: IGDB.GdbServerType = args.serverType || 'st7';
+
+        // st7 not support async mode
+        this.useSyncMode = adpTag === 'st7';
+
+        // get gdb adapter by tag
         const adapter = getAdapter(adpTag);
         if (adapter === undefined) {
             this.error(`Not found gdb adapter: '${adpTag}'`);
@@ -771,7 +777,7 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
         this.sendResponse(response); // launch done !
 
         await this.loadBreakPoints();
-        const bkpt = await this.gdb.continue();
+        const bkpt = await this.gdb.continue(this.useSyncMode);
         if (bkpt) {
             this.sendEvent(new StoppedEvent(args.runToMain !== false ? 'entry' : 'breakpoint', this.ThreadID));
         }
@@ -782,7 +788,7 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
             this.gdb.sendCommand('reset', 'null').then((result) => {
                 if (result.resultType === 'done') {
                     this.sendEvent(new ContinuedEvent(this.ThreadID, true));
-                    this.gdb.continue().then(() => {
+                    this.gdb.continue(this.useSyncMode).then(() => {
                         this.sendEvent(new StoppedEvent('breakpoint', this.ThreadID));
                     });
                     this.sendResponse(response);
@@ -1069,7 +1075,7 @@ export class DebugAdapter extends DebugSession implements vscode.TextDocumentCon
     }
 
     protected continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments): void {
-        this.gdb.continue().then(() => {
+        this.gdb.continue(this.useSyncMode).then(() => {
             this.timeUsed = this.gdb.getCommandTimeUsage();
             this.sendEvent(new StoppedEvent('breakpoint', this.ThreadID));
         });

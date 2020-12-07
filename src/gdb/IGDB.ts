@@ -164,7 +164,7 @@ export interface IGDB {
 
     interrupt(): Promise<Breakpoint>;
 
-    continue(): Promise<Breakpoint>;
+    continue(syncMode?: boolean): Promise<Breakpoint>;
 
     next(instruction?: boolean): Promise<Breakpoint>;
 
