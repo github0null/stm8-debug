@@ -2,6 +2,10 @@
 
 All notable changes to the "stm8-debug" extension will be documented in this file.
 
+## [v1.3.0]
+- Fixed: st7 can not launch debug
+***
+
 ## [v1.2.0]
 - Fixed: can not interrupt program
 - Fixed: can not hit breakpoint

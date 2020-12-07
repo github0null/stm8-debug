@@ -2,7 +2,7 @@
     "name": "stm8-debug",
     "displayName": "STM8 Debugger",
     "description": "STM8 Debugger for vscode",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "publisher": "cl",
     "author": {
         "name": "cl",

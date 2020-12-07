@@ -67,6 +67,15 @@ A STM8 Debugger for vscode. Use STLink to debug your STM8 program
 
 2. link your STLink and board, press `F5` to launch stm8 debugger
 
+
+***
+
+## Attention 🚩
+
+- ### The file path must contain only **ASCII** characters
+
+- ### The debugger 'ST7' is not support suspend your program
+
 ***
 
 ## Peripheral View support
@@ -171,7 +180,3 @@ There is a demo for `stm8s003f3` cpu, file name: `stm8s003f3.svd.json`
     }
 ]
 ```
-
-## Attention 🚩
-
-- ### The file path must contain only ASCII characters
