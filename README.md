@@ -45,6 +45,8 @@ A STM8 Debugger for vscode. Use STLink to debug your STM8 program
 
 - **Use SDCC Toolchain :**
 
+**Notice:** make sure you can find your 'target' and 'interface' in OpenOcd config folder !, like: 'target/stm8s003.cfg'
+
 ```json
 {
     "version": "0.2.0",
@@ -70,7 +72,7 @@ A STM8 Debugger for vscode. Use STLink to debug your STM8 program
 
 ***
 
-## Attention 🚩
+## Notice 🚩
 
 - ### The file path must contain only **ASCII** characters
 
