@@ -15,3 +15,4 @@ vsc-extension-quickstart.md
 bin/gdb.7z
 bin/sdcc
 bin/st7
+bin/openocd

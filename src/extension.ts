@@ -190,6 +190,7 @@ async function checkBinaries(constex: vscode.ExtensionContext): Promise<boolean>
     if (!installedDone) {
         platform.DeleteDir(File.fromArray([binFolder.path, 'sdcc']));
         platform.DeleteDir(File.fromArray([binFolder.path, 'st7']));
+        platform.DeleteDir(File.fromArray([binFolder.path, 'openocd']));
     }
 
     return installedDone;

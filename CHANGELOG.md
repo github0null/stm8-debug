@@ -2,6 +2,10 @@
 
 All notable changes to the "stm8-debug" extension will be documented in this file.
 
+## [v1.4.1]
+- Optimize: use build-in openocd
+***
+
 ## [v1.4.0]
 - Fixed: can't kill stm8-gdb.exe when debugger exited
 - Optimize: use online download for `stm8-gdb`

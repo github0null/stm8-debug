@@ -2,7 +2,7 @@
     "name": "stm8-debug",
     "displayName": "STM8 Debugger",
     "description": "STM8 Debugger for vscode",
-    "version": "1.4.0",
+    "version": "1.4.1",
     "publisher": "cl",
     "author": {
         "name": "cl",
@@ -54,11 +54,6 @@
                     "markdownDescription": "Display statement time usage, may not be accurate",
                     "type": "boolean",
                     "default": false
-                },
-                "stm8-debug.OpenOcdPath": {
-                    "markdownDescription": "OpenOCD executable file path",
-                    "type": "string",
-                    "default": ""
                 }
             }
         },

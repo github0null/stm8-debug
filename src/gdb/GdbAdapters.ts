@@ -92,7 +92,7 @@ class GdbSDCC implements GdbAdapter {
             try {
                 child_process.execFileSync(exePath, ['-v']);
             } catch (error) {
-                vscode.window.showErrorMessage('Not found openocd !, Please set it !');
+                vscode.window.showErrorMessage(`run '${exePath}' failed, msg: '${(<Error>error).message}'`);
                 resolve('Not found openocd !');
                 return;
             }

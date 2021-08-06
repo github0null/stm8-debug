@@ -7,3 +7,4 @@ test
 **/*.log
 bin/sdcc
 bin/st7
+bin/openocd

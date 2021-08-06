@@ -55,7 +55,7 @@ export class ResourceManager {
     }
 
     getOpenOCDPath(): string {
-        return this.getAppConfig().get<string>('OpenOcdPath') || 'openocd';
+        return [(<File>this.dirMap.get('bin')).path, 'openocd', 'bin', 'openocd.exe'].join(File.sep);
     }
 
     isVerboseMode(): boolean {

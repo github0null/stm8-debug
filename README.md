@@ -16,8 +16,7 @@ A STM8 Debugger for vscode. Use STLink to debug your STM8 program
 
 ### Preparatory work
 
-1. Install STLink or RLink driver program
-2. If you want to debug **SDCC stm8 program**, you must install OpenOCD and set path
+- Install STLink or RLink driver program on your PC
 
 ***
 
@@ -96,7 +95,7 @@ You can browse **cpu peripheral value** by **Peripheral View**, like this:
 
 **Note:** You need to create a new **\<cpu_name>.svd.json** file to support a new stm8 cpu.
 
-step 1. create a new **<cpu_name>.svd.json** file, write peripheral descriptions.
+step 1. create a new **`<cpu_name>.svd.json`** file, write peripheral descriptions.
 
 step 2. set **svdFile** property in **launch.json**
 
@@ -181,3 +180,8 @@ There is a demo for `stm8s003f3` cpu, file name: `stm8s003f3.svd.json`
     }
 ]
 ```
+
+## Feedback 💡
+
+[forum: https://discuss.em-ide.com/t/stm8-debug](https://discuss.em-ide.com/t/stm8-debug)
+
