@@ -5,6 +5,7 @@ import * as NodePath from 'path';
 import { Executable, ExeFile } from "../../lib/node-utility/Executable";
 import * as vscode from "vscode";
 import * as child_process from 'child_process';
+import * as platform from '../platform';
 
 class GdbST7 implements GdbAdapter {
 
@@ -68,12 +69,14 @@ class GdbSDCC implements GdbAdapter {
     private openOCDHost: Executable = <any>undefined;
     private output: vscode.OutputChannel;
 
+    private gdbPort: number = 3333;
+
     constructor() {
         this.output = vscode.window.createOutputChannel('openocd-stm8');
         this.output.clear();
     }
 
-    onConnect(option: ConnectOption): Promise<string | undefined> {
+    onConnect(option: ConnectOption): Promise<string | undefined | void> {
 
         return new Promise((resolve) => {
 
@@ -101,6 +104,12 @@ class GdbSDCC implements GdbAdapter {
                 commands.push('-f', item);
             });
 
+            /* override gdb port */
+            if (option.port && /^\d+$/.test(option.port)) {
+                this.gdbPort = parseInt(option.port) || this.gdbPort;
+            }
+
+            commands.push('-c', `gdb_port ${this.gdbPort}`);
             commands.push('-c', 'init');
             commands.push('-c', 'reset halt');
 
@@ -133,14 +142,18 @@ class GdbSDCC implements GdbAdapter {
             }
 
             // log
-            this.output.appendLine(`[Log]: launch openocd: ${exePath} ${commands.join(' ')}\r\n`);
+            this.output.appendLine(`[Log]: launch openocd: ${exePath} ${commands.map((cmd) => {
+                if (cmd.includes(' ')) { return `"${cmd}"`; }
+                return cmd;
+            }).join(' ')}\r\n`);
 
             this.openOCDHost.Run(exePath, commands);
         });
     }
 
     async onKill(): Promise<string | undefined> {
-        await this.openOCDHost.Kill();
+        const pid = this.openOCDHost.pid();
+        if (pid) { platform.kill(pid); }
         return undefined;
     }
 
@@ -157,7 +170,7 @@ class GdbSDCC implements GdbAdapter {
             `set print elements 0`, // full print char array
             `set width 0`, // disable multi-line
             `file "${option.executable}"`,
-            `target extended-remote localhost:3333`
+            `target extended-remote localhost:${this.gdbPort}`
         ];
     }
 

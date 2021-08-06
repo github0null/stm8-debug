@@ -115,7 +115,7 @@ export interface GdbAdapter {
 
     // -- event 
 
-    onConnect(option: ConnectOption): Promise<ErrorMsg | undefined>;
+    onConnect(option: ConnectOption): Promise<ErrorMsg | undefined | void>;
 
     onKill(): Promise<ErrorMsg | undefined>;
 }

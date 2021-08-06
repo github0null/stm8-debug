@@ -5,4 +5,5 @@ node_modules
 dist
 test
 **/*.log
-bin
+bin/sdcc
+bin/st7

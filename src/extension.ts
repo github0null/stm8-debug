@@ -4,10 +4,14 @@ import { DebugAdapter } from './DebugAdapter';
 import { ResourceManager } from './ResourceManager';
 import * as os from 'os';
 import { CodelensProvider } from './CodeLensProvider';
+import { File } from '../lib/node-utility/File';
+import * as utility from './utility';
+import * as fs from 'fs';
+import * as platform from './platform';
 
 let vsContext: vscode.ExtensionContext;
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
 
     vsContext = context;
 
@@ -19,6 +23,12 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     ResourceManager.getInstance(context);
+
+    /* check stm8 gdb binaries */
+    if (!await checkBinaries(context)) { 
+        vscode.window.showErrorMessage(`Install stm8 gdb failed, aborted !`);
+        return; 
+    }
 
     context.subscriptions.push(
         vscode.debug.registerDebugAdapterDescriptorFactory('stm8-debug', new STM8DebugAdapterDescriptorFactory()),
@@ -82,3 +92,105 @@ class STM8DebugAdapterDescriptorFactory implements vscode.DebugAdapterDescriptor
     }
 }
 
+async function checkBinaries(constex: vscode.ExtensionContext): Promise<boolean> {
+
+    const downloadSites: string[] = [
+        `https://raw-github.github0null.io/github0null/stm8-debug/master/bin/gdb.7z`,
+        `https://raw.githubusercontent.com/github0null/stm8-debug/master/bin/gdb.7z`
+    ];
+
+    const rootFolder = new File(constex.extensionPath);
+    const binFolder = File.fromArray([rootFolder.path, 'bin']);
+
+    /* check bin folder */
+    if (File.fromArray([binFolder.path, File.ToLocalPath('st7/gdb.exe')]).IsFile()) {
+        return true; /* found it, exit */
+    }
+
+    let installedDone = false;
+
+    try {
+        const tmpFile = File.fromArray([os.tmpdir(), 'stm8-gdb-bin.7z']);
+
+        /* make dir */
+        binFolder.CreateDir(true);
+
+        const done = await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: 'Downloading stm8 gdb binaries',
+            cancellable: false
+        }, async (progress, token): Promise<boolean> => {
+
+            let res: Buffer | undefined | Error = undefined;
+
+            for (const site of downloadSites) {
+                const realUrl = utility.redirectHost(site);
+                res = await utility.downloadFileWithProgress(realUrl, tmpFile.name, progress, token);
+                if (res instanceof Buffer) { break; } /* if done, exit loop */
+                progress.report({ message: 'Switch to next download site !' });
+            }
+
+            if (res instanceof Error) { /* download failed */
+                vscode.window.showWarningMessage(`Error: ${res.message}`);
+                return false;
+            } else if (res == undefined) { /* canceled */
+                return false;
+            }
+
+            /* save to file */
+            fs.writeFileSync(tmpFile.path, res);
+
+            return true;
+        });
+
+        /* download done, unzip and install it */
+        if (done) {
+
+            installedDone = await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: `Installing stm8 gdb binaries`,
+                cancellable: false
+            }, async (progress, __): Promise<boolean> => {
+
+                return new Promise((resolve_) => {
+
+                    let resolved = false;
+                    const resolveIf = (data: boolean) => {
+                        if (!resolved) {
+                            resolved = true;
+                            resolve_(data);
+                        }
+                    };
+                    
+                    progress.report({ message: `Unzipping package ...` });
+
+                    const err = platform.unzipSync(
+                        ResourceManager.getInstance().get7zaExe().path,
+                        tmpFile,
+                        binFolder
+                    );
+
+                    if (err) {
+                        vscode.window.showErrorMessage(`Error: ${err.message}`);
+                        resolveIf(false);
+                        return;
+                    }
+
+                    progress.report({ message: `Install stm8 gdb binaries done !` });
+                    setTimeout(() => resolveIf(true), 500);
+                });
+            });
+        }
+
+    } catch (error) {
+        vscode.window.showErrorMessage(`Error: ${error.message}`);
+    }
+
+    /* clear dir if failed */
+    if (!installedDone) {
+        platform.DeleteDir(File.fromArray([binFolder.path, 'sdcc']));
+        platform.DeleteDir(File.fromArray([binFolder.path, 'st7']));
+    }
+
+    return installedDone;
+}

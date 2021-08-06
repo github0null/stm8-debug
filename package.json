@@ -2,7 +2,7 @@
     "name": "stm8-debug",
     "displayName": "STM8 Debugger",
     "description": "STM8 Debugger for vscode",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "publisher": "cl",
     "author": {
         "name": "cl",
@@ -79,8 +79,7 @@
                     "launch": {
                         "required": [
                             "executable",
-                            "serverType",
-                            "cpu"
+                            "serverType"
                         ],
                         "properties": {
                             "name": {
@@ -363,8 +362,7 @@
                             },
                             "port": {
                                 "type": "string",
-                                "description": "[st7] STLink port name, like: COM3",
-                                "default": "COM3"
+                                "description": "If gdb server is `st7`, it means STLink port name (like: COM3), else it means gdb tcp listening port (like: 3333)."
                             },
                             "openOcdConfigs": {
                                 "type": "array",
@@ -409,6 +407,7 @@
                         "serverType": "stm8-sdcc",
                         "executable": ".\\\\out\\\\SDCC\\\\executable.elf",
                         "cpu": "STM8S103F3P",
+                        "port": "3333",
                         "openOcdConfigs": [
                             "interface/stlink.cfg",
                             "target/stm8s.cfg"
@@ -425,6 +424,7 @@
                             "serverType": "stm8-sdcc",
                             "name": "${1:Launch Program}",
                             "cpu": "STM8S103F3P",
+                            "port": "3333",
                             "executable": ".\\\\out\\\\executable.out"
                         }
                     }

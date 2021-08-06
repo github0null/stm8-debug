@@ -46,6 +46,10 @@ export class ResourceManager {
         return <File>this.dirMap.get('svd');
     }
 
+    get7zaExe(): File {
+        return File.fromArray([(<File>this.dirMap.get('bin')).path, '7z', '7za']);
+    }
+
     getWorkspaceDir(): File | null {
         return this.workspaceDir;
     }

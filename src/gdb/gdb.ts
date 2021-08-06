@@ -599,9 +599,7 @@ class CommandQueue {
 
     async kill() {
         const pid = this.proc.pid();
-        if (pid) {
-            kill(pid);
-        }
+        if (pid) { kill(pid); }
     }
 
     on(event: 'error', lisenter: (err: Error) => void): void;

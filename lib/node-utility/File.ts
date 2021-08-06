@@ -14,12 +14,12 @@ export class File {
     readonly dir: string;           // example 'd:\\dir'
     readonly path: string;          // example 'd:\\dir\\demo.cpp'
 
-    constructor(fPath: string) {
-        this.path = fPath;
-        this.name = Path.basename(fPath);
+    constructor(filePath: string) {
+        this.path = filePath;
+        this.name = Path.basename(this.path);
         this.noSuffixName = this.GetNoSuffixName(this.name);
-        this.suffix = Path.extname(fPath);
-        this.dir = Path.dirname(fPath);
+        this.suffix = Path.extname(this.path);
+        this.dir = Path.dirname(this.path);
     }
 
     static fromArray(pathArray: string[]): File {
@@ -49,29 +49,25 @@ export class File {
 
         return res;
     }
-
-    static isPath(path: string): boolean {
-        return /^(?:[a-z]\:|\/|\.)/i.test(path);
-    }
-/* 
-    // ./././aaaa/././././bbbb => ./aaaa/bbbb
-    private static DelRepeatedPath(_path: string) {
-
-        let path = _path;
-
-        // delete '..' of path
-        let parts = path.split('/');
-        let index = -1;
-        while ((index = parts.indexOf('..')) > 0) {
-            parts.splice(index - 1, 2);
+    /* 
+        // ./././aaaa/././././bbbb => ./aaaa/bbbb
+        private static DelRepeatedPath(_path: string) {
+    
+            let path = _path;
+    
+            // delete '..' of path
+            let parts = path.split('/');
+            let index = -1;
+            while ((index = parts.indexOf('..')) > 0) {
+                parts.splice(index - 1, 2);
+            }
+    
+            // delete '.' of path
+            path = parts.join('/').replace(/\/\.(?=\/)/g, '');
+    
+            return path;
         }
-
-        // delete '.' of path
-        path = parts.join('/').replace(/\/\.(?=\/)/g, '');
-
-        return path;
-    }
- */
+     */
     private static _match(str: string, isInverter: boolean, regList: RegExp[]): boolean {
 
         let isMatch: boolean = false;
@@ -133,6 +129,20 @@ export class File {
         return this._filter(fList, true, fileFilter, dirFilter);
     }
 
+    static IsExist(path: string): boolean {
+        return fs.existsSync(path);
+    }
+
+    static IsFile(path: string): boolean {
+        return fs.existsSync(path) && fs.lstatSync(path).isFile();
+    }
+
+    static IsDir(path: string): boolean {
+        return fs.existsSync(path) && fs.lstatSync(path).isDirectory();
+    }
+
+    //---------
+
     private GetNoSuffixName(name: string): string {
         const nList = this.name.split('.');
         if (nList.length > 1) {
@@ -158,43 +168,41 @@ export class File {
     }
 
     /**
-     * example: this.path: 'd:\app\abc\.', absPath: 'd:\app\abc\.\def\a.c', result: './def/a.c'
+     * example: this.path: 'd:\app\abc\.', absPath: 'd:\app\abc\.\def\a.c', result: '.\def\a.c'
     */
-    ToRelativePath(path: string, toLocal?: boolean): string | undefined {
+    ToRelativePath(abspath: string, hasPrefix: boolean = true): string | undefined {
 
-        const root = File.ToUnixPath(this.path);
-        const abspath = File.ToUnixPath(path);
-
-        if (root.length >= abspath.length) {
+        if (!Path.isAbsolute(abspath)) {
             return undefined;
         }
 
-        if (abspath.startsWith(root)) {
-            const res = (root.endsWith('/') ? './' : '.') + abspath.substr(root.length);
-            if (toLocal && File.sep !== '/') {
-                return res.replace(/\//g, File.sep);
-            }
-            return res;
+        const rePath = Path.relative(this.path, abspath);
+        if (Path.isAbsolute(rePath)) {
+            return undefined;
         }
 
-        return undefined;
+        if (rePath === '') {
+            return '.';
+        }
+
+        return hasPrefix ? (`.${File.sep}${rePath}`) : rePath;
     }
 
     //----------------------------------------------------
 
     CreateDir(recursive: boolean = false): void {
         if (!this.IsDir()) {
-            if (recursive) {
+            if (recursive) { // create parent folder
                 let list = this.path.split(Path.sep);
-                let f: File;
                 if (list.length > 0) {
-                    let dir: string = list[0];
-                    for (let i = 0; i < list.length;) {
-                        f = new File(dir);
-                        if (!f.IsDir()) {
-                            fs.mkdirSync(f.path);
+                    let _path: string = list[0]; // set root
+                    for (let i = 1; i < list.length; i++) {
+                        _path += (Path.sep + list[i]);
+                        if (fs.existsSync(_path)
+                            && (fs.lstatSync(_path).isDirectory() || fs.lstatSync(_path).isSymbolicLink())) {
+                            continue; // skip existed folder
                         }
-                        dir += ++i < list.length ? (Path.sep + list[i]) : '';
+                        fs.mkdirSync(_path);
                     }
                     return;
                 }
@@ -271,7 +279,7 @@ export class File {
         });
     }
 
-    CopyAll(dir: File, fileFilter?: RegExp[], dirFilter?: RegExp[]) {
+    CopyAllFile(dir: File, fileFilter?: RegExp[], dirFilter?: RegExp[]) {
         let fList = dir.GetAll(fileFilter, dirFilter);
         fList.forEach(f => {
             if (f.IsFile()) {
@@ -295,17 +303,11 @@ export class File {
     }
 
     IsFile(): boolean {
-        if (fs.existsSync(this.path)) {
-            return fs.lstatSync(this.path).isFile();
-        }
-        return false;
+        return fs.existsSync(this.path) && fs.lstatSync(this.path).isFile();
     }
 
     IsDir(): boolean {
-        if (fs.existsSync(this.path)) {
-            return fs.lstatSync(this.path).isDirectory();
-        }
-        return false;
+        return fs.existsSync(this.path) && fs.lstatSync(this.path).isDirectory();
     }
 
     getHash(hashName?: string): string {

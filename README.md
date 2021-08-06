@@ -57,7 +57,6 @@ A STM8 Debugger for vscode. Use STLink to debug your STM8 program
             "name": "Launch Program",
             "serverType": "stm8-sdcc",
             "executable": ".\\out\\Debug\\stm8_demo.elf",
-            "cpu": "STM8S003F3P",
             "openOcdConfigs": [
                 "interface/stlink.cfg",
                 "target/stm8s003.cfg"

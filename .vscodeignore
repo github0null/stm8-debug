@@ -12,3 +12,6 @@ vsc-extension-quickstart.md
 *.config.js
 *.code-workspace
 **/*.log
+bin/gdb.7z
+bin/sdcc
+bin/st7
