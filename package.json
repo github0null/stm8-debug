@@ -467,12 +467,12 @@
         "@types/vscode": "^1.40.0",
         "glob": "^7.1.5",
         "mocha": "^6.2.2",
-        "ts-loader": "^7.0.3",
+        "ts-loader": "^9.4.2",
         "tslint": "^5.20.0",
         "typescript": "^3.6.4",
         "vscode-test": "^1.2.2",
-        "webpack": "^4.43.0",
-        "webpack-cli": "^3.3.11"
+        "webpack": "^5.75.0",
+        "webpack-cli": "^5.0.1"
     },
     "dependencies": {
         "vscode-debugadapter": "^1.40.0",
